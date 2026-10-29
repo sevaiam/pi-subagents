@@ -18,10 +18,13 @@ import {
 	runHerdrPaneCommand,
 	sendHerdrPaneEnter,
 } from "./herdr.ts";
+import { closeRexSurface, readRexScreen, readRexScreenAsync, sendRexCommand, type RexChildTarget } from "./rex.ts";
 import { closeZellijSurface } from "./zellij-runtime.ts";
 
-export function sendCommand(surface: string, command: string): void {
+export function sendCommand(surface: string, command: string, rexTarget?: RexChildTarget): void {
+	if (rexTarget) return sendRexCommand(surface, command, rexTarget);
 	const backend = requireMuxBackend();
+	if (backend === "rex") return sendRexCommand(surface, command);
 	if (backend === "cmux") {
 		execSync(`cmux send --surface ${shellEscape(surface)} ${shellEscape(`${command}\n`)}`, { encoding: "utf8" });
 		return;
@@ -78,6 +81,7 @@ function buildStagedShellCommand(scriptPath: string): string {
 
 export function sendShellCommand(surface: string, command: string): void {
 	const backend = requireMuxBackend();
+	if (backend === "rex") throw new Error("Rex children must use native argv launch, not shell input");
 	if (backend !== "cmux" && backend !== "herdr") {
 		sendCommand(surface, command);
 		return;
@@ -93,8 +97,10 @@ export function sendShellCommand(surface: string, command: string): void {
 	}
 }
 
-export function readScreen(surface: string, lines = 50): string {
+export function readScreen(surface: string, lines = 50, rexTarget?: RexChildTarget): string {
+	if (rexTarget) return tailLines(readRexScreen(surface, rexTarget), lines);
 	const backend = requireMuxBackend();
+	if (backend === "rex") return tailLines(readRexScreen(surface), lines);
 	if (backend === "cmux") {
 		return execSync(`cmux read-screen --surface ${shellEscape(surface)} --lines ${lines}`, { encoding: "utf8" });
 	}
@@ -119,8 +125,10 @@ export function readScreen(surface: string, lines = 50): string {
 	throw new Error("Unsupported mux backend");
 }
 
-export async function readScreenAsync(surface: string, lines = 50): Promise<string> {
+export async function readScreenAsync(surface: string, lines = 50, rexTarget?: RexChildTarget): Promise<string> {
+	if (rexTarget) return tailLines(await readRexScreenAsync(surface, rexTarget), lines);
 	const backend = requireMuxBackend();
+	if (backend === "rex") return tailLines(await readRexScreenAsync(surface), lines);
 	if (backend === "cmux") {
 		const { stdout } = await execFileAsync("cmux", ["read-screen", "--surface", surface, "--lines", String(lines)], {
 			encoding: "utf8",
@@ -152,16 +160,20 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
 export async function closeSurfaceAsync(
 	surface: string,
 	zellijTarget?: { sessionName: string; parentPaneId: number },
+	rexTarget?: RexChildTarget,
 ): Promise<void> {
-	if (requireMuxBackend() === "zellij") {
+	if (rexTarget) return closeRexSurface(surface, rexTarget);
+	if (zellijTarget || requireMuxBackend() === "zellij") {
 		await closeZellijSurface(surface, zellijTarget);
 		return;
 	}
 	closeSurface(surface);
 }
 
-export function closeSurface(surface: string): void {
+export function closeSurface(surface: string, rexTarget?: RexChildTarget): void {
+	if (rexTarget) return closeRexSurface(surface, rexTarget);
 	const backend = requireMuxBackend();
+	if (backend === "rex") return closeRexSurface(surface);
 	if (backend === "cmux") {
 		execSync(`cmux close-surface --surface ${shellEscape(surface)}`, {
 			encoding: "utf8",

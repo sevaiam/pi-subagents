@@ -51,7 +51,7 @@ if [ "$*" = "status server --json" ]; then
   printf '%s\n' '{"status":"running","running":true,"compatible":true,"protocol":17,"version":"0.7.5"}'
   exit 0
 fi
-if [ "$*" = "pane current --current" ]; then
+if [ "$*" = "pane get w1:p1" ]; then
   printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1","focused":true}}}'
   exit 0
 fi
@@ -118,6 +118,8 @@ function useFakeHerdr(): string {
 	const dir = createTestDir();
 	const logFile = writeFakeHerdr(dir);
 	clearHerdrPlacementEnv();
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p1";
 	process.env.PATH = dir;
 	process.env.FAKE_HERDR_LOG = logFile;
 	process.env.FAKE_HERDR_COUNTER = join(dir, "split-count");

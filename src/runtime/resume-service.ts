@@ -28,6 +28,7 @@ import {
 import { expandSubagentTask } from "../launch/task-expansion.ts";
 import { resolveSubagentCwd } from "../launch/runtime-paths.ts";
 import { buildInteractiveShellCommand } from "../launch/shell-command.ts";
+import { createRexCommandSurface, requireRexCaller, rexChildTarget } from "../mux/rex.ts";
 import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
 import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import {
@@ -493,6 +494,14 @@ async function resumeSubagentSessionWithoutWidth(
 	} else {
 		const surfaceName = invocationMetadata?.sessionTitle ?? displayName;
 		const backend = getMuxBackend();
+		if (invocationMetadata?.muxBackend && invocationMetadata.muxBackend !== backend) {
+			throw new Error(`Cannot resume ${invocationMetadata.muxBackend} child in ${backend ?? "unknown"} context`);
+		}
+		const rexTarget = backend === "rex" ? requireRexCaller() : undefined;
+		if (invocationMetadata?.rexSessionId && invocationMetadata.rexSessionId !== rexTarget?.sessionId) {
+			throw new Error("Cannot resume Rex child in a different Rex session");
+		}
+		if (rexTarget) resumeEnvVars.PI_SUBAGENT_INITIAL_TITLE = surfaceName;
 		const herdrContext =
 			backend === "herdr"
 				? {
@@ -513,7 +522,7 @@ async function resumeSubagentSessionWithoutWidth(
 					}
 				: undefined;
 		const zellijTarget = backend === "zellij" ? await resolveZellijTarget() : undefined;
-		const ordinarySurface = zellijTarget
+		const ordinarySurface = zellijTarget || rexTarget
 			? undefined
 			: await createSurface(surfaceName, {
 					herdr: herdrContext,
@@ -528,25 +537,28 @@ async function resumeSubagentSessionWithoutWidth(
 		}
 		if (zellijTarget) resumeEnvVars.ZELLIJ_SESSION_NAME = zellijTarget.sessionName;
 		if (ordinarySurface) resumeEnvVars.PI_SUBAGENT_SURFACE = ordinarySurface;
-		const { command, dispose } = buildInteractiveShellCommand({
+		const { command, argv, dispose } = buildInteractiveShellCommand({
 			cwd: resumeCwd ?? undefined,
 			piArgs,
 			envOverrides: resumeEnvVars,
 			denyEnv: invocationMetadata?.denyEnv,
 			doneSentinelFile,
 			...(zellijTarget ? { deriveZellijPaneSurface: true } : {}),
+			...(rexTarget ? { rexParent: rexTarget } : {}),
 		});
 		try {
-			const surface =
-				ordinarySurface ??
+			const surface = rexTarget
+				? createRexCommandSurface(surfaceName, argv, resumeCwd ?? process.cwd())
+				: ordinarySurface ??
 				(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
-			if (!zellijTarget) {
+			if (!zellijTarget && !rexTarget) {
 				await new Promise<void>((resolve) => setTimeout(resolve, runtime.getShellReadyDelayMs()));
 				sendShellCommand(surface, command);
 			}
 			running.surface = surface;
 			running.doneSentinelFile = doneSentinelFile;
 			running.zellijTarget = zellijTarget;
+			running.rexTarget = rexTarget ? rexChildTarget(rexTarget, surface) : undefined;
 		} catch (error) {
 			// Nothing consumed the capsule; do not leave credentials behind.
 			dispose();

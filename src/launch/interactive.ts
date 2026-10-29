@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSubagentDisplayTitle, isSetTabTitleToolEnabled } from "../agents/titles.ts";
 import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
+import { createRexCommandSurface, requireRexCaller, rexChildTarget } from "../mux/rex.ts";
 import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import { createSurface, getMuxBackend, sendShellCommand } from "../mux.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
@@ -145,8 +146,11 @@ export async function launchInteractiveSubagent(
 	}
 
 	const startTime = Date.now();
-	const zellijTarget = !surfacePreCreated && getMuxBackend() === "zellij" ? await resolveZellijTarget() : undefined;
-	const ordinarySurface = zellijTarget
+	const backend = getMuxBackend();
+	const rexTarget = backend === "rex" ? requireRexCaller() : undefined;
+	if (rexTarget && surfacePreCreated) throw new Error("Rex launches require a new native command block, not a pre-created shell");
+	const zellijTarget = !surfacePreCreated && backend === "zellij" ? await resolveZellijTarget() : undefined;
+	const ordinarySurface = zellijTarget || rexTarget
 		? undefined
 		: (options?.surface ??
 			(await createSurface(surfaceName, {
@@ -155,6 +159,7 @@ export async function launchInteractiveSubagent(
 			})));
 	const envVars = {
 		...launch.envVars,
+		...(rexTarget ? { PI_SUBAGENT_INITIAL_TITLE: surfaceName } : {}),
 		...(zellijTarget ? { ZELLIJ_SESSION_NAME: zellijTarget.sessionName } : {}),
 		...(ordinarySurface ? { PI_SUBAGENT_SURFACE: ordinarySurface } : {}),
 		// The child receives the parent's clock, not its own: pane startup time
@@ -177,18 +182,20 @@ export async function launchInteractiveSubagent(
 
 	const { launchEntryCount } = launch;
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
-	const { command, capsulePath, dispose } = buildInteractiveShellCommand({
+	const { command, argv, capsulePath, dispose } = buildInteractiveShellCommand({
 		cwd: launch.forcedCwd ?? prepared.runtimePaths.effectiveCwd ?? undefined,
 		piArgs,
 		envOverrides: envVars,
 		denyEnv: prepared.agentDefs?.denyEnv,
 		doneSentinelFile,
 		...(zellijTarget ? { deriveZellijPaneSurface: true } : {}),
+		...(rexTarget ? { rexParent: rexTarget } : {}),
 	});
 	let surface: string;
 	try {
-		surface =
-			ordinarySurface ??
+		surface = rexTarget
+			? createRexCommandSurface(surfaceName, argv, launch.forcedCwd ?? prepared.runtimePaths.effectiveCwd ?? ctx.cwd)
+			: ordinarySurface ??
 			(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
 		traceSubagentLaunch("interactive.surface", {
 			id,
@@ -196,7 +203,7 @@ export async function launchInteractiveSubagent(
 			surface,
 			surfacePreCreated,
 		});
-		if (!surfacePreCreated && !zellijTarget) {
+		if (!surfacePreCreated && !zellijTarget && !rexTarget) {
 			await new Promise<void>((resolve) => setTimeout(resolve, runtime.getShellReadyDelayMs()));
 		}
 		traceSubagentLaunch("interactive.send", {
@@ -209,7 +216,7 @@ export async function launchInteractiveSubagent(
 			capsulePath,
 			envKeys: Object.keys(envVars).sort(),
 		});
-		if (!zellijTarget) sendShellCommand(surface, command);
+		if (!zellijTarget && !rexTarget) sendShellCommand(surface, command);
 	} catch (error) {
 		// The pane never received the command, so nothing will consume the
 		// capsule. Delete it rather than leaving credentials on disk.
@@ -241,5 +248,6 @@ export async function launchInteractiveSubagent(
 		launchMetadata: launch.launchMetadata,
 		doneSentinelFile,
 		zellijTarget,
+		rexTarget: rexTarget ? rexChildTarget(rexTarget, surface) : undefined,
 	};
 }

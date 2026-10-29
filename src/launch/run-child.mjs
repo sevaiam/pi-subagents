@@ -88,6 +88,28 @@ if (capsule.deriveZellijPaneSurface && typeof process.env.ZELLIJ_PANE_ID === "st
 	env.PI_SUBAGENT_SURFACE = `pane:${process.env.ZELLIJ_PANE_ID}`;
 }
 
+if (capsule.rexParent) {
+	const session = process.env.REX_SESSION;
+	const block = process.env.REX_BLOCK;
+	const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+	if (session !== capsule.rexParent.sessionId || !new RegExp(`^block:${uuid}$`, "i").test(block ?? "") ||
+		block === capsule.rexParent.blockId) {
+		process.stderr.write("run-child: invalid Rex child identity; refusing inherited parent target\n");
+		process.exit(2);
+	}
+	// The capsule must not replay the parent's pane IDs, even through frontmatter overrides.
+	for (const key of Object.keys(env)) {
+		if (/^(HERDR|CMUX|TMUX|WEZTERM|ZELLIJ|REX)/.test(key)) delete env[key];
+	}
+	for (const [key, value] of Object.entries(process.env)) {
+		if (key.startsWith("REX") && typeof value === "string") env[key] = value;
+	}
+	env.REX_SESSION = session;
+	env.REX_BLOCK = block;
+	env.PI_SUBAGENT_SURFACE = block;
+	env.PI_SUBAGENT_MUX = "rex";
+}
+
 if (typeof capsule.processIdFile === "string" && capsule.processIdFile) {
 	writeFileSync(capsule.processIdFile, `${process.pid}\n`, "utf8");
 }

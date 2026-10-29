@@ -26,6 +26,8 @@ export interface EnvCapsule {
 	processIdFile?: string;
 	/** Derive PI_SUBAGENT_SURFACE as `pane:$ZELLIJ_PANE_ID` in the child pane. */
 	deriveZellijPaneSurface?: boolean;
+	/** Validate native Rex identity, then derive the child's surface from its new block. */
+	rexParent?: { sessionId: string; blockId: string };
 }
 
 export const ENV_CAPSULE_DIR_PREFIX = "pi-subagent-env-";

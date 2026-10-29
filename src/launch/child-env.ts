@@ -17,6 +17,7 @@ export const PANE_IDENTITY_ENV_PATTERNS = [
 	"CMUX*",
 	"COLORTERM",
 	"HERDR*",
+	"REX*",
 	"TERM",
 	"TMUX*",
 	"WEZTERM*",

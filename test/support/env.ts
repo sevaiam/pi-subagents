@@ -16,7 +16,10 @@ export const TRACKED_ENV_KEYS = [
 	"FAKE_ZELLIJ_LOG",
 	"FAKE_ZELLIJ_PANE_ID",
 	"FAKE_ZELLIJ_SCREEN",
+	"HERDR_ENV",
 	"HERDR_PANE_ID",
+	"REX_SESSION",
+	"REX_BLOCK",
 	"HERDR_TAB_ID",
 	"HERDR_WORKSPACE_ID",
 	"PATH",
@@ -27,6 +30,7 @@ export const TRACKED_ENV_KEYS = [
 	"PI_SUBAGENT_MUX",
 	"PI_SUBAGENT_AGENT",
 	"PI_SUBAGENT_NAME",
+	"PI_SUBAGENT_INITIAL_TITLE",
 	"PI_SUBAGENT_SPAWN_BUDGET",
 	"PI_SUBAGENT_SPAWN_DEPTH",
 	"PI_SUBAGENT_SPAWN_WIDTH",
@@ -85,6 +89,8 @@ export function restoreTrackedEnv(): void {
 
 beforeEach(() => {
 	clearIsolatedSubagentEnv();
+	// Fake mux tests must never discover a real caller inherited from the test runner.
+	for (const key of ["HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "REX_SESSION", "REX_BLOCK"]) delete process.env[key];
 });
 
 afterEach(() => {

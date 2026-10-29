@@ -373,8 +373,15 @@ export function getHerdrServerStatus(): HerdrServerStatus {
 }
 
 export function getHerdrCurrentPane(): HerdrPane {
-	const result = runHerdrApi("pane current", ["pane", "current", "--current"]);
-	return parsePane(result.pane, "pane current");
+	const paneId = process.env.HERDR_PANE_ID;
+	if (process.env.HERDR_ENV !== "1" || !/^w[a-z0-9]+:p[a-z0-9]+$/i.test(paneId ?? "") ||
+		process.env.REX_SESSION !== undefined || process.env.REX_BLOCK !== undefined) {
+		throw new Error("Herdr requires an unambiguous HERDR_ENV=1 and HERDR_PANE_ID");
+	}
+	const result = runHerdrApi("pane current", ["pane", "get", paneId!]);
+	const pane = parsePane(result.pane, "pane current");
+	if (pane.paneId !== paneId) throw new Error("Herdr did not return the requested caller pane");
+	return pane;
 }
 
 export function getHerdrPaneLayout(paneId?: string): HerdrPaneLayout {
@@ -504,7 +511,8 @@ export function renameHerdrWorkspace(workspaceId: string, title: string): void {
 export function isHerdrRuntimeAvailable(
 	hasCommand: (command: string) => boolean = (command) => defaultMuxRuntimeProbe.hasCommand(command),
 ): boolean {
-	if (!hasCommand("herdr")) return false;
+	if (process.env.HERDR_ENV !== "1" || !/^w[a-z0-9]+:p[a-z0-9]+$/i.test(process.env.HERDR_PANE_ID ?? "") ||
+		process.env.REX_SESSION !== undefined || process.env.REX_BLOCK !== undefined || !hasCommand("herdr")) return false;
 	try {
 		const status = getHerdrServerStatus();
 		if (!status.running || !status.compatible) return false;

@@ -19,11 +19,14 @@ export interface InteractiveShellCommandInput {
 	doneSentinelFile: string;
 	/** Derive PI_SUBAGENT_SURFACE from the child pane's ZELLIJ_PANE_ID. */
 	deriveZellijPaneSurface?: boolean;
+	rexParent?: { sessionId: string; blockId: string };
 }
 
 export interface InteractiveShellCommand {
 	/** The string typed or staged into the child pane. Paths only — never env data. */
 	command: string;
+	/** Native mux launch argv. Environment and Pi args remain in the private capsule. */
+	argv: string[];
 	capsulePath: string;
 	/**
 	 * Delete the capsule. Call only when the launch failed before the pane's
@@ -55,11 +58,13 @@ export function buildInteractiveShellCommand(input: InteractiveShellCommandInput
 		paneIdentityKeys: [...PANE_IDENTITY_ENV_PATTERNS],
 		processIdFile: getInteractiveProcessFile(input.doneSentinelFile),
 		...(input.deriveZellijPaneSurface ? { deriveZellijPaneSurface: true } : {}),
+		...(input.rexParent ? { rexParent: input.rexParent } : {}),
 	});
 	const sentinel = buildInteractiveSentinelShellCommands(input.doneSentinelFile);
 	const launcher = `${shellEscape(process.execPath)} ${shellEscape(getRunChildLauncherPath())} ${shellEscape(capsulePath)}`;
 	const command =
 		`trap ${shellEscape(sentinel.exitTrap)} EXIT; ` +
 		`${buildShellChangeDirectoryPrefix(input.cwd)}${launcher}; ${sentinel.direct}`;
-	return { command, capsulePath, dispose: () => disposeEnvCapsule(capsulePath) };
+	return { command, argv: [process.execPath, getRunChildLauncherPath(), capsulePath], capsulePath,
+		dispose: () => disposeEnvCapsule(capsulePath) };
 }

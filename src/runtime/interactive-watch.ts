@@ -254,12 +254,13 @@ async function watchInteractiveGeneration(
 			signalAborted: signal.aborted,
 		});
 		const pollResult =
-			getMuxBackend() === "zellij"
+			!running.rexTarget && (running.zellijTarget || getMuxBackend() === "zellij")
 				? await pollForZellijFiles(running, signal, updateStats)
 				: await (runtime.pollForExit ?? pollForExit)(surface, signal, {
 						interval: 1000,
 						sessionFile,
 						doneSentinelFile: running.doneSentinelFile,
+						rexTarget: running.rexTarget,
 						onTick: updateStats,
 					});
 

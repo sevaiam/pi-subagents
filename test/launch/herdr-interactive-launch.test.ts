@@ -60,7 +60,7 @@ if [ "$*" = "status server --json" ]; then
   exit 0
 fi
 
-if [ "$*" = "pane current --current" ]; then
+if [ "$*" = "pane get w1:p1" ]; then
   printf '%s\n' '{"id":"cli:pane:current","result":{"type":"pane_current","pane":{"pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1","cwd":"/parent","foreground_cwd":"/parent","focused":true}}}'
   exit 0
 fi
@@ -128,6 +128,8 @@ function useFakeHerdr(): { dir: string; logFile: string } {
 	const dir = createTestDir();
 	const logFile = writeFakeHerdr(dir);
 	clearMuxRuntimeEnv();
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p1";
 	process.env.PATH = dir;
 	return { dir, logFile };
 }
@@ -313,7 +315,7 @@ describe("Herdr interactive launch parity", () => {
 
 		const log = readFileSync(logFile, "utf8");
 		assert.match(log, /status server --json/);
-		assert.match(log, /pane current --current/);
+		assert.match(log, /pane get w1:p1/);
 		assert.match(log, /pane layout --pane w1:p1/);
 		assert.match(log, /pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/);
 		assert.match(log, /pane rename w1:p2 \[path-session\] Path session child/);
@@ -446,7 +448,7 @@ describe("Herdr interactive launch parity", () => {
 
 		const log = readFileSync(logFile, "utf8");
 		assert.match(log, /status server --json/);
-		assert.match(log, /pane current --current/);
+		assert.match(log, /pane get w1:p1/);
 		assert.match(log, /pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/);
 		assert.match(log, /pane rename w1:p2 \[forced-herdr\] Forced herdr child/);
 		assert.doesNotMatch(log, /tab create|tab rename/);

@@ -314,7 +314,7 @@ if [ "$*" = "status server --json" ]; then
   printf '%s\\n' '{"status":"running","running":true,"compatible":true,"protocol":17,"version":"0.7.5"}'
   exit 0
 fi
-if [ "$*" = "pane current --current" ]; then
+if [ "$*" = "pane get w1:p1" ]; then
   printf '%s\\n' '{"result":{"pane":{"pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1","focused":true}}}'
   exit 0
 fi
@@ -327,6 +327,8 @@ exit 1
 		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
 		process.env.PI_SUBAGENT_MUX = "herdr";
 		process.env.PI_SUBAGENT_HERDR_PLACEMENT = "auto";
+		process.env.HERDR_ENV = "1";
+		process.env.HERDR_PANE_ID = "w1:p1";
 		try {
 			const launch = await coordinateSubagentLaunch(
 				{
@@ -352,6 +354,8 @@ exit 1
 			else process.env.PATH = originalPath;
 			delete process.env.PI_SUBAGENT_MUX;
 			delete process.env.PI_SUBAGENT_HERDR_PLACEMENT;
+			delete process.env.HERDR_ENV;
+			delete process.env.HERDR_PANE_ID;
 		}
 	});
 

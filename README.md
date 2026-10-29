@@ -4,7 +4,7 @@
 
 It began as a fork of [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents), then grew into a monumental refactor: named agents, interactive panes, background workers, async parallelism, blocking agents, child-to-parent communication, forked context, a beautiful TUI widget, orchestrator mode, and much more!
 
-Use it when one agent should hand work to another agent instead of trying to do everything in one transcript. Interactive children open in Herdr, cmux, tmux, zellij, or WezTerm; background children run headlessly.
+Use it when one agent should hand work to another agent instead of trying to do everything in one transcript. Interactive children open in Rex, Herdr, cmux, tmux, zellij, or WezTerm; background children run headlessly.
 
 https://github.com/user-attachments/assets/e0b97493-6c9b-4710-ba26-a6c08230ba28
 
@@ -24,7 +24,7 @@ Special thanks to [@FasalZein](https://github.com/FasalZein) and [@isthatyousaf]
 ## Install
 
 ```bash
-pi install git:github.com/edxeth/pi-subagents
+pi install git:github.com/sevaiam/pi-subagents
 ```
 
 ## The model
@@ -38,7 +38,7 @@ Two axes matter:
 - `interactive` or `background`: where the child runs
 - async or sync: whether the parent waits
 
-`interactive` means foreground. Pi opens a visible surface through Herdr, cmux, tmux, zellij, or WezTerm. Normal launches use a backend-specific surface, such as a tab, window, split, or stacked pane.
+`interactive` means foreground. Pi opens a visible surface through Rex, Herdr, cmux, tmux, zellij, or WezTerm. Normal launches use a backend-specific surface, such as a tab, window, split, or stacked pane.
 
 `background` means headless. Pi starts a `pi -p` child process without opening a pane.
 
@@ -46,11 +46,11 @@ Async means the parent gets a “started” result and the child answer comes ba
 
 ### Interactive mux backends
 
-Interactive children open in your current terminal backend. `pi-subagents` supports Herdr, cmux, tmux, zellij, and WezTerm.
+Interactive children open in your current terminal backend. `pi-subagents` supports Rex, Herdr, cmux, tmux, zellij, and WezTerm.
 
-Start `pi` inside the backend you want to use. Leave `PI_SUBAGENT_MUX` unset to let Pi detect it, or set it to `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` to force one.
+Start `pi` inside the backend you want to use. Leave `PI_SUBAGENT_MUX` unset to detect it, or set it to `rex`, `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` to select one.
 
-The backend command must exist, and Pi must be able to see the current pane or session context. If no supported backend is active, interactive launches fail with a setup hint.
+The backend command must exist, and Pi must have a valid caller identity. Rex requires `REX_SESSION` and `REX_BLOCK`. Herdr requires `HERDR_ENV=1` and `HERDR_PANE_ID`. Mixed, incomplete, stale, or conflicting identities fail before creating a child. A running Herdr server alone does not select Herdr. Rex never falls back to Herdr, including when the Rex CLI is missing or a launch fails.
 
 Normal launches use a backend-specific surface. Herdr keeps children beside the parent while the tab has room, then uses dedicated tabs for overflow. Every Herdr child pane is labeled with its session title, such as `[reviewer] Auth implementation review`. Other backends may use windows, splits, or stacked panes.
 
@@ -911,7 +911,7 @@ User-facing knobs:
 | --- | --- |
 | `PI_ORCHESTRATOR_MODE` | Set `1` to turn the parent into an orchestrator (delegation-only tools, replacement system prompt) |
 | `PI_SUBAGENT_PI_COMMAND` | Launch children through a wrapper command |
-| `PI_SUBAGENT_MUX` | Force `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` |
+| `PI_SUBAGENT_MUX` | Select `rex`, `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm`; conflicting caller identities fail |
 | `PI_CODING_AGENT_DIR` | Use a different Pi agent config root |
 | `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN` | Set `1` to let the parent keep running after async launches |
 | `PI_SUBAGENT_DISABLE_CHILD_CONTEXT_BOUNDARY` | Set `1` for raw forks with no boundary marker |
@@ -951,6 +951,16 @@ Live test knobs:
 - `PI_SUBAGENT_LIVE_LOCK_PATH`
 - `PI_SUBAGENT_ALLOW_VERIFIED_E2E` (llm-as-a-verifier live e2e; also needs `DEEPSEEK_API_KEY`)
 - `PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS` — override the provider-error recovery backoff windows (comma-separated ms, e.g. `10000,11000,12000`) so a live Pi process can exercise the wait → nudge → kill path without waiting the full 30/60/90s. Values below 10000ms are clamped so recovery does not race Pi's own default auto-retry backoff. Defaults to the production `30000,60000,90000`.
+
+## Rex placement and lifecycle
+
+Rex launches each interactive child in a block beside the caller's explicit block. Creation uses exact argv, the child's working directory, and `--focus=false`. It does not type a launch command into a shell or create a project session. Herdr placement options do not affect Rex.
+
+The child receives the existing parent-environment snapshot and its own Rex session/block identity. `PI_SUBAGENT_SURFACE` identifies the child block, not the parent's block. Rex does not require zsh; the existing Pi command or `PI_SUBAGENT_PI_COMMAND` wrapper remains in use. Native launches do not run interactive shell startup files.
+
+Rex uses `rex wait` to observe process exit, including terminals kept open after exit. Durable child completion and `caller_ping` signals take priority over process exit. The supervisor retains the child's owning session and block so it can clean up its own child after the parent block disappears. It never closes unrelated blocks.
+
+The optional `set_tab_title` tool names only the child block. It does not rename a shared Rex window or project session. Existing model/title extensions remain responsible for their model-tag and task-title policy.
 
 ## Herdr placement
 
@@ -1008,6 +1018,22 @@ Unit tests:
 bunx tsc --noEmit
 npm test
 ```
+
+Rex-focused fake tests:
+
+```bash
+node --test --test-concurrency=1 test/mux/rex.test.ts test/launch/rex-interactive-launch.test.ts
+```
+
+The Rex suites cover strict detection, explicit target ownership, native argv launch, child identity, wait payload validation, durable completion/ping signals, waiter cancellation, cleanup after parent removal, resume guards, and manual-title protection.
+
+The guarded Rex CLI smoke uses a new temporary session and Node probe processes. It does not call a model or copy authentication files:
+
+```bash
+PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:live-rex-mux
+```
+
+It checks live and already-exited process waits, input/capture, cancellation, ping before exit, capsule identity, manual titles, and cleanup after removing the test parent. Without the opt-in, it prints `SKIP` before creating anything. A CLI smoke does not replace model-backed Pi orchestration tests.
 
 Herdr-focused fake tests:
 
@@ -1075,10 +1101,23 @@ Herdr validation record for this release:
 - `npm test` runs the registered Herdr mux and launch suites through the repository test entrypoint.
 - `npm run test:live-herdr-mux` and `npm run test:live-herdr-pi` pass their skip guards when `PI_SUBAGENT_ALLOW_LIVE_WINDOWS` and `PI_SUBAGENT_LIVE_MODEL` are unset. A real live run requires the opt-in variables above.
 
+### Fork validation record
+
+The development checks used upstream commit `cf6dbf4` as the comparison baseline.
+
+- Type checking and file-size checks passed.
+- Eight real interactive parent/child cases passed: Sol, Astra, Fable, and Opus in both Rex and Herdr. These are user-configured model aliases, not required provider IDs.
+- Real Rex resume passed for both lineage-only and standalone child sessions.
+- The guarded Rex CLI smoke passed, including cancellation, manual-title protection, and cleanup after parent removal.
+- The non-verifier test run had 1,000 passes, five failures, and four skips. The untouched baseline had 977 passes, the same five failures, and four skips. The failures concerned a macOS temporary-path assertion and skill fixtures.
+- The full `npm test` run encountered a verifier provisioning timeout. The same test timed out on the untouched baseline. This record does not claim a fully passing test suite.
+
 ## Credits
 
 - upstream foundation: [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents)
-- this fork: [edxeth/pi-subagents](https://github.com/edxeth/pi-subagents)
+- orchestration foundation: [edxeth/pi-subagents](https://github.com/edxeth/pi-subagents)
+- this fork: [sevaiam/pi-subagents](https://github.com/sevaiam/pi-subagents)
+- Rex integration reference: [elucid/pi-rex-subagents](https://github.com/elucid/pi-rex-subagents). This backend uses the installed Rex CLI contract and keeps the existing orchestration implementation.
 
 ## License
 

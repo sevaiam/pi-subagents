@@ -16,6 +16,7 @@ import { writeResumeTaskArtifact } from "../launch/prompt-artifacts.ts";
 import { buildResumePiArgs, getResumeCwd } from "../launch/resume.ts";
 import { buildInteractiveShellCommand } from "../launch/shell-command.ts";
 import { getSkillVisibilitySpec, PI_SUBAGENT_SKILL_VISIBILITY } from "../launch/skill-visibility.ts";
+import { createRexCommandSurface, requireRexCaller, rexChildTarget } from "../mux/rex.ts";
 import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
 import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import { closeSurfaceAsync } from "../mux/io.ts";
@@ -189,6 +190,14 @@ export async function restartSubagentForTimeoutWrapUp(
 
 	const metadata = running.launchMetadata!;
 	const backend = getMuxBackend();
+	if (metadata.muxBackend && metadata.muxBackend !== backend) {
+		throw new Error(`Cannot restart ${metadata.muxBackend} child in ${backend ?? "unknown"} context`);
+	}
+	const rexTarget = backend === "rex" ? requireRexCaller() : undefined;
+	if (metadata.rexSessionId && metadata.rexSessionId !== rexTarget?.sessionId) {
+		throw new Error("Cannot restart Rex child in a different Rex session");
+	}
+	if (rexTarget) launch.env.PI_SUBAGENT_INITIAL_TITLE = metadata.sessionTitle ?? running.title ?? running.name;
 	const zellijTarget = backend === "zellij" ? await resolveZellijTarget() : undefined;
 	throwIfAborted(signal);
 	const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
@@ -203,7 +212,7 @@ export async function restartSubagentForTimeoutWrapUp(
 	let surface: string | undefined;
 	let disposeCapsule: (() => void) | undefined;
 	try {
-		if (!zellijTarget) {
+		if (!zellijTarget && !rexTarget) {
 			surface = await createSurface(metadata.sessionTitle ?? running.title ?? running.name, {
 				herdr: { policy: metadata.herdrPlacementPolicy },
 				zellij: zellijContext,
@@ -223,16 +232,22 @@ export async function restartSubagentForTimeoutWrapUp(
 		piArgs.push(`@${taskPath}`);
 		if (zellijTarget) launch.env.ZELLIJ_SESSION_NAME = zellijTarget.sessionName;
 		if (surface) launch.env.PI_SUBAGENT_SURFACE = surface;
-		const { command, dispose } = buildInteractiveShellCommand({
+		const { command, argv, dispose } = buildInteractiveShellCommand({
 			cwd: launch.cwd ?? undefined,
 			piArgs,
 			envOverrides: launch.env,
 			denyEnv: metadata.denyEnv,
 			doneSentinelFile,
 			...(zellijTarget ? { deriveZellijPaneSurface: true } : {}),
+			...(rexTarget ? { rexParent: rexTarget } : {}),
 		});
 		disposeCapsule = dispose;
-		if (zellijTarget) {
+		if (rexTarget) {
+			surface = createRexCommandSurface(metadata.sessionTitle ?? running.title ?? running.name, argv, launch.cwd ?? process.cwd());
+			running.surface = surface;
+			running.rexTarget = rexChildTarget(rexTarget, surface);
+			throwIfAborted(signal);
+		} else if (zellijTarget) {
 			surface = await createZellijCommandSurface(
 				metadata.sessionTitle ?? running.title ?? running.name,
 				zellijTarget,
@@ -254,7 +269,7 @@ export async function restartSubagentForTimeoutWrapUp(
 		disposeCapsule?.();
 		if (surface) {
 			try {
-				await closeSurfaceAsync(surface, zellijTarget);
+				await closeSurfaceAsync(surface, zellijTarget, running.rexTarget);
 			} catch {
 				running.timeoutKillFailed = true;
 			}
@@ -262,6 +277,7 @@ export async function restartSubagentForTimeoutWrapUp(
 		}
 		running.doneSentinelFile = undefined;
 		running.zellijTarget = undefined;
+		running.rexTarget = undefined;
 		throw error;
 	}
 }

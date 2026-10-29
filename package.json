@@ -1,7 +1,7 @@
 {
 	"name": "pi-subagents",
 	"version": "2.9.2",
-	"description": "Power-user multi-agent framework for Pi: named agents, interactive sessions via Herdr/cmux/tmux/zellij/WezTerm, background workers, async/sync coordination, fork/resume, child-to-parent messaging, orchestrator mode, and a live TUI",
+	"description": "Power-user multi-agent framework for Pi: named agents, interactive sessions via Rex/Herdr/cmux/tmux/zellij/WezTerm, background workers, async/sync coordination, fork/resume, child-to-parent messaging, orchestrator mode, and a live TUI",
 	"keywords": [
 		"pi-package"
 	],
@@ -9,7 +9,7 @@
 	"author": "edxeth",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/edxeth/pi-subagents"
+		"url": "https://github.com/sevaiam/pi-subagents"
 	},
 	"type": "module",
 	"scripts": {
@@ -29,6 +29,7 @@
 		"test:frontmatter-timeout-warn": "node scripts/test-frontmatter-timeout-warn.mjs",
 		"test:frontmatter-on-timeout": "node scripts/test-frontmatter-on-timeout.mjs",
 		"test:live-herdr-mux": "node scripts/test-live-herdr-mux.mjs",
+		"test:live-rex-mux": "node scripts/test-live-rex-mux.mjs",
 		"test:live-herdr-pi": "node scripts/test-live-herdr-pi.mjs",
 		"test:live-herdr-timeout-wrap-up": "node scripts/test-live-herdr-timeout-wrap-up.mjs"
 	},
@@ -58,6 +59,7 @@
 			"ghostty",
 			"herdr",
 			"pkill",
+			"rex",
 			"where.exe",
 			"wezterm",
 			"zellij"

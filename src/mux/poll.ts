@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { clearSubagentExitSidecar, getSubagentExitSidecarPath } from "../session/exit-sidecar.ts";
 import { getInteractiveProcessFile } from "../session/interactive-process.ts";
 import { readScreenAsync } from "./io.ts";
+import { getMuxBackend } from "./core.ts";
+import { waitForRexExit, type RexChildTarget } from "./rex.ts";
 
 export interface PollResult {
 	reason: "done" | "ping" | "sentinel" | "error";
@@ -165,9 +167,43 @@ export async function pollForExit(
 		sessionFile?: string;
 		doneSentinelFile?: string;
 		onTick?: (elapsed: number) => void;
+		rexTarget?: RexChildTarget;
 	},
 ): Promise<PollResult> {
 	const start = Date.now();
+	if (options.rexTarget || getMuxBackend() === "rex") {
+		if (signal.aborted) throw new Error("Aborted while waiting for subagent to finish");
+		const readOutcome = () => options.sessionFile ? consumeSubagentExitSignal(options.sessionFile) : null;
+		const ready = readOutcome();
+		if (ready) return ready;
+		const waiterAbort = new AbortController();
+		const waiter = waitForRexExit(surface, waiterAbort.signal, options.rexTarget).then(
+			(exitCode): PollResult => readOutcome() ?? { reason: "sentinel", exitCode },
+			(error): PollResult => { const outcome = readOutcome(); if (outcome) return outcome; throw error; },
+		);
+		let timer: ReturnType<typeof setInterval> | undefined;
+		let onAbort: () => void = () => {};
+		const sidecar = new Promise<PollResult>((resolve, reject) => {
+			onAbort = () => reject(new Error("Aborted while waiting for subagent to finish"));
+			signal.addEventListener("abort", onAbort, { once: true });
+			if (signal.aborted) onAbort();
+			timer = setInterval(() => {
+				try {
+					const outcome = readOutcome();
+					if (outcome) resolve(outcome);
+					else options.onTick?.(Math.floor((Date.now() - start) / 1000));
+				} catch (error) { reject(error); }
+			}, Math.max(1, options.interval));
+		});
+		try {
+			return await Promise.race([waiter, sidecar]);
+		} finally {
+			clearInterval(timer);
+			signal.removeEventListener("abort", onAbort);
+			waiterAbort.abort();
+			await waiter.catch(() => {});
+		}
+	}
 
 	while (true) {
 		if (signal.aborted) {

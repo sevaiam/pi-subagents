@@ -32,7 +32,10 @@ function clearMuxRuntimeEnv(): void {
 	delete process.env.WEZTERM_UNIX_SOCKET;
 	delete process.env.ZELLIJ;
 	delete process.env.ZELLIJ_SESSION_NAME;
+	delete process.env.HERDR_ENV;
 	delete process.env.HERDR_PANE_ID;
+	delete process.env.REX_SESSION;
+	delete process.env.REX_BLOCK;
 	delete process.env.HERDR_TAB_ID;
 	delete process.env.HERDR_WORKSPACE_ID;
 	delete process.env.PI_SUBAGENT_MUX;
@@ -73,7 +76,7 @@ if [ "$cmd" = "status server --json" ]; then
   exit 0
 fi
 
-if [ "$cmd" = "pane current --current" ]; then
+if [ "$cmd" = "pane get w1:p1" ]; then
   case "$mode" in
     no-current)
       printf '%s\n' '{"error":{"code":"current_pane_not_found","message":"no current Herdr pane"},"id":"cli:pane:current"}'
@@ -221,6 +224,8 @@ function useFakeHerdr(mode = "available"): {
 	const screenFile = join(dir, "herdr-screen.txt");
 	writeFileSync(screenFile, "herdr line 1\nherdr line 2\n");
 	clearMuxRuntimeEnv();
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p1";
 	process.env.PATH = dir;
 	process.env.FAKE_HERDR_LOG = logFile;
 	process.env.FAKE_HERDR_MODE = mode;
@@ -264,13 +269,13 @@ describe("Herdr mux backend", async () => {
 			});
 		}
 
-		it("prefers Herdr over an outer tmux when no forced preference is set", async () => {
+		it("refuses mixed Herdr and tmux caller identity",  async () => {
 			const { dir } = useFakeHerdr();
 			writeFakeCommand(dir, "tmux");
 			process.env.TMUX = "fake-tmux-socket";
 			process.env.TMUX_PANE = "%1";
 
-			assert.equal(getMuxBackend(), "herdr");
+			assert.equal(getMuxBackend(), null);
 		});
 
 		it("uses forced Herdr only when Herdr is actually available", async () => {
@@ -309,13 +314,13 @@ describe("Herdr mux backend", async () => {
 				envValue: "fake-wezterm-socket",
 			},
 		] as const) {
-			it(`respects forced ${backend} preference over available Herdr`, async () => {
+			it(`refuses forced ${backend} preference conflicting with Herdr identity`, async () => {
 				const { dir } = useFakeHerdr();
 				writeFakeCommand(dir, command);
 				process.env.PI_SUBAGENT_MUX = backend;
 				process.env[envKey] = envValue;
 
-				assert.equal(getMuxBackend(), backend);
+				assert.equal(getMuxBackend(), null);
 			});
 		}
 
@@ -519,7 +524,7 @@ describe("Herdr mux backend", async () => {
 
 			const log = readFileSync(process.env.FAKE_HERDR_LOG!, "utf8");
 			assert.match(log, /status server --json/);
-			assert.match(log, /pane current --current/);
+			assert.match(log, /pane get w1:p1/);
 			assert.match(log, /tab get w1:t1/);
 			assert.match(log, /workspace get w1/);
 		});

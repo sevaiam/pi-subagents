@@ -1,4 +1,5 @@
 import { execFileSync, execSync } from "node:child_process";
+import { renameRexChild } from "./rex.ts";
 import { createCmuxSplit, createCmuxSurface } from "./cmux-surfaces.ts";
 import { getMuxBackend, requireMuxBackend, shellEscape, zellijActionSync } from "./core.ts";
 import {
@@ -27,6 +28,7 @@ export interface SurfaceCreationOptions {
 
 export async function createSurface(name: string, options?: SurfaceCreationOptions): Promise<string> {
 	const backend = getMuxBackend();
+	if (backend === "rex") throw new Error("Rex requires native command launch; shell staging is not supported");
 
 	if (backend === "cmux") {
 		return createCmuxSurface(name);
@@ -256,6 +258,7 @@ export function createSurfaceSplit(
 	fromSurface?: string,
 ): string {
 	const backend = requireMuxBackend();
+	if (backend === "rex") throw new Error("Rex requires native command launch; pre-created shells are not supported");
 	if (backend === "cmux") return createCmuxSplit(name, direction, fromSurface);
 	if (backend === "tmux") return createTmuxSplit(name, direction, fromSurface);
 	if (backend === "wezterm") return createWezTermSplit(name, direction, fromSurface);
@@ -265,6 +268,7 @@ export function createSurfaceSplit(
 
 export function renameCurrentTab(title: string): void {
 	const backend = requireMuxBackend();
+	if (backend === "rex") return renameRexChild(title);
 	if (backend === "cmux") {
 		const surfaceId = process.env.CMUX_SURFACE_ID;
 		if (!surfaceId) throw new Error("CMUX_SURFACE_ID not set");
@@ -308,6 +312,7 @@ export function renameCurrentTab(title: string): void {
 
 export function renameWorkspace(title: string): void {
 	const backend = requireMuxBackend();
+	if (backend === "rex") return; // Shared project session is never an agent's task title.
 	if (backend === "cmux") {
 		execSync(`cmux workspace-action --action rename --title ${shellEscape(title)}`, { encoding: "utf8" });
 		return;

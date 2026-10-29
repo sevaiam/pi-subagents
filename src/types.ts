@@ -189,6 +189,8 @@ export interface RunningSubagent {
 	 * authorized recipient, so it may not cancel the run. */
 	verifiedRunCancelDenied?: boolean;
 	zellijTarget?: { sessionName: string; parentPaneId: number };
+	/** Captured child ownership; cleanup must not depend on the parent block remaining live. */
+	rexTarget?: import("./mux/rex.ts").RexChildTarget;
 	surfaceClosePromise?: Promise<void>;
 }
 

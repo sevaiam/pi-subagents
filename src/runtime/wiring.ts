@@ -107,7 +107,7 @@ async function closeRunningSurface(running: RunningSubagent): Promise<void> {
 	if (running.surfaceClosePromise) return running.surfaceClosePromise;
 	if (!running.surface) return;
 	const surface = running.surface;
-	const closePromise = closeSurfaceAsync(surface, running.zellijTarget);
+	const closePromise = closeSurfaceAsync(surface, running.zellijTarget, running.rexTarget);
 	running.surfaceClosePromise = closePromise;
 	try {
 		await closePromise;

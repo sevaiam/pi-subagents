@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentDefaults } from "../agents/definitions.ts";
+import type { MuxBackend } from "../mux/core.ts";
 import type { HerdrPlacementPolicy } from "../mux/herdr-surfaces.ts";
 import type { ZellijPlacementPolicy } from "../mux/zellij-placement.ts";
 import type { ParentClosePolicy, SubagentParamsInput } from "../types.ts";
@@ -30,6 +31,10 @@ export interface PersistedSubagentLaunchMetadata {
 	sessionTitle?: string;
 	agent?: string;
 	mode: ResumeMode;
+	/** Interactive backend at launch; prevents silent cross-backend resume. */
+	muxBackend?: MuxBackend;
+	/** Rex resumes must remain in the original owning project session. */
+	rexSessionId?: string;
 	sessionMode: SubagentSessionMode;
 	autoExit?: boolean;
 	parentClosePolicy: ParentClosePolicy;

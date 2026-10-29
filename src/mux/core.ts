@@ -3,10 +3,11 @@ import { basename } from "node:path";
 import { promisify } from "node:util";
 import { isHerdrRuntimeAvailable } from "./herdr.ts";
 import { defaultMuxRuntimeProbe } from "./runtime-probe.ts";
+import { isRexRuntimeAvailable } from "./rex.ts";
 
 export const execFileAsync = promisify(execFile);
 
-export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm" | "herdr";
+export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm" | "herdr" | "rex";
 
 function hasCommand(command: string): boolean {
 	return defaultMuxRuntimeProbe.hasCommand(command);
@@ -14,7 +15,7 @@ function hasCommand(command: string): boolean {
 
 function muxPreference(): MuxBackend | null {
 	const pref = (process.env.PI_SUBAGENT_MUX ?? "").trim().toLowerCase();
-	if (pref === "cmux" || pref === "tmux" || pref === "zellij" || pref === "wezterm" || pref === "herdr") {
+	if (pref === "cmux" || pref === "tmux" || pref === "zellij" || pref === "wezterm" || pref === "herdr" || pref === "rex") {
 		return pref;
 	}
 	return null;
@@ -58,13 +59,21 @@ export function isHerdrAvailable(): boolean {
 
 export function getMuxBackend(): MuxBackend | null {
 	const pref = muxPreference();
+	if (process.env.PI_SUBAGENT_MUX?.trim() && !pref) return null;
+	const rex = ["REX_SESSION", "REX_BLOCK"].some((key) => process.env[key] !== undefined);
+	const herdr = ["HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID"].some((key) => process.env[key] !== undefined);
+	const other = !!(process.env.CMUX_SOCKET_PATH || process.env.TMUX || process.env.ZELLIJ ||
+		process.env.ZELLIJ_SESSION_NAME || process.env.WEZTERM_UNIX_SOCKET);
+	// Caller identity wins over server availability. Partial or mixed contexts fail closed.
+	if ((rex && herdr) || ((rex || herdr) && other)) return null;
+	if (rex) return (!pref || pref === "rex") && isRexRuntimeAvailable(hasCommand) ? "rex" : null;
+	if (herdr) return (!pref || pref === "herdr") && isHerdrMuxRuntimeAvailable() ? "herdr" : null;
+	if (pref === "rex" || pref === "herdr") return null;
 	if (pref === "cmux") return isCmuxRuntimeAvailable() ? "cmux" : null;
 	if (pref === "tmux") return isTmuxRuntimeAvailable() ? "tmux" : null;
 	if (pref === "zellij") return isZellijRuntimeAvailable() ? "zellij" : null;
 	if (pref === "wezterm") return isWezTermRuntimeAvailable() ? "wezterm" : null;
-	if (pref === "herdr") return isHerdrMuxRuntimeAvailable() ? "herdr" : null;
 
-	if (isHerdrMuxRuntimeAvailable()) return "herdr";
 	if (isCmuxRuntimeAvailable()) return "cmux";
 	if (isTmuxRuntimeAvailable()) return "tmux";
 	if (isZellijRuntimeAvailable()) return "zellij";
@@ -86,14 +95,15 @@ export function muxSetupHint(): string {
 		return "Start pi inside zellij (`zellij --session pi`, then run `pi`).";
 	}
 	if (pref === "wezterm") return "Start pi inside WezTerm.";
+	if (pref === "rex") return "Start pi inside Rex with a valid REX_SESSION and REX_BLOCK; do not mix multiplexer identities.";
 	if (pref === "herdr") return "Start pi inside Herdr (`herdr`, then run `pi`).";
-	return "Start pi inside Herdr (`herdr`, then run `pi`), cmux (`cmux pi`), tmux (`tmux new -A -s pi 'pi'`), zellij (`zellij --session pi`, then run `pi`), or WezTerm.";
+	return "Start pi inside Rex (with REX_SESSION and REX_BLOCK), Herdr (`herdr`, then run `pi`), cmux (`cmux pi`), tmux (`tmux new -A -s pi 'pi'`), zellij (`zellij --session pi`, then run `pi`), or WezTerm.";
 }
 
 export function requireMuxBackend(): MuxBackend {
 	const backend = getMuxBackend();
 	if (!backend) {
-		throw new Error(`No supported terminal multiplexer found. ${muxSetupHint()}`);
+		throw new Error(`No supported terminal multiplexer found, or caller identity is mixed, incomplete, stale, or conflicts with PI_SUBAGENT_MUX. No backend fallback is allowed. ${muxSetupHint()}`);
 	}
 	return backend;
 }

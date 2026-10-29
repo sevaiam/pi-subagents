@@ -13,11 +13,13 @@ export {
 export { resolveHerdrPlacementPolicy } from "./mux/herdr-surfaces.ts";
 export {
 	closeSurface,
+	closeSurfaceAsync,
 	readScreen,
 	readScreenAsync,
 	sendCommand,
 	sendShellCommand,
 } from "./mux/io.ts";
+export { createRexCommandSurface, requireRexCaller, rexChildTarget, type RexChildTarget } from "./mux/rex.ts";
 export { consumeSubagentExitSignal, pollForExit } from "./mux/poll.ts";
 export {
 	createSurface,

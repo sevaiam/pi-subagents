@@ -100,8 +100,11 @@ export async function coordinateSubagentLaunch(
 			...zellijPlacement,
 		},
 	);
+	if (options.mode === "interactive") launchMetadata.muxBackend = getMuxBackend() ?? undefined;
+	if (launchMetadata.muxBackend === "rex") launchMetadata.rexSessionId = process.env.REX_SESSION;
 	const storage = new ChildSessionStorage(prepared.subagentSessionFile);
-	if (existsSync(prepared.subagentSessionFile)) {
+	// Standalone Rex sessions still need durable backend ownership before a later resume.
+	if (existsSync(prepared.subagentSessionFile) || launchMetadata.muxBackend === "rex") {
 		if (seedMode === "fork") storage.writeModelState(launchMetadata);
 		await storage.writeLaunchMetadataWhenReady(launchMetadata, 0);
 	}

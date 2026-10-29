@@ -11,6 +11,11 @@ const ORIGINAL_ENV = {
 	PI_SUBAGENT_MUX: process.env.PI_SUBAGENT_MUX,
 	CMUX_SOCKET_PATH: process.env.CMUX_SOCKET_PATH,
 	FAKE_CMUX_GEOMETRY: process.env.FAKE_CMUX_GEOMETRY,
+	HERDR_ENV: process.env.HERDR_ENV,
+	HERDR_PANE_ID: process.env.HERDR_PANE_ID,
+	HERDR_TAB_ID: process.env.HERDR_TAB_ID,
+	REX_SESSION: process.env.REX_SESSION,
+	REX_BLOCK: process.env.REX_BLOCK,
 };
 
 afterEach(() => {
@@ -21,6 +26,7 @@ afterEach(() => {
 });
 
 function installFakeCmux(): { dir: string; log: string } {
+	for (const key of ["HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "REX_SESSION", "REX_BLOCK"]) delete process.env[key];
 	const dir = mkdtempSync(join(tmpdir(), "pi-subagents-cmux-test-"));
 	const log = join(dir, "cmux.log");
 	const bin = join(dir, "cmux");
