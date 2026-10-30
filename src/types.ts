@@ -181,6 +181,8 @@ export interface RunningSubagent {
 	allowSteerDelivery?: boolean;
 	shutdownTimer?: ReturnType<typeof setTimeout>;
 	doneSentinelFile?: string;
+	/** Idempotent disposal retained until this interactive generation finishes or is stopped. */
+	disposeLaunchCapsule?: () => void;
 	/** Verified fan-out (ticket 07): run dir of the supervised fan-out this entry fronts. */
 	verifiedRunDir?: string;
 	/** Verified fan-out: durable run id (manifest name). */

@@ -31,7 +31,7 @@ export interface PersistedSubagentLaunchMetadata {
 	sessionTitle?: string;
 	agent?: string;
 	mode: ResumeMode;
-	/** Interactive backend at launch; prevents silent cross-backend resume. */
+	/** Interactive backend at launch; transitions into or out of Rex require matching ownership. */
 	muxBackend?: MuxBackend;
 	/** Rex resumes must remain in the original owning project session. */
 	rexSessionId?: string;

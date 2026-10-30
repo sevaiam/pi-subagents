@@ -3,11 +3,13 @@ import { spawnSync } from "node:child_process";
 import { launchInteractiveSubagent } from "../../src/launch/interactive.ts";
 import { resumeSubagentSession } from "../../src/runtime/resume-service.ts";
 import { stopRunningSubagent } from "../../src/runtime/wiring.ts";
+import { watchSubagent } from "../../src/runtime/interactive-watch.ts";
+import { shutdownSubagentsForParentExit } from "../../src/runtime/shutdown.ts";
 import { restartSubagentForTimeoutWrapUp } from "../../src/runtime/timeout-wrap-up.ts";
 import { disposeEnvCapsule } from "../../src/launch/env-capsule.ts";
 import { buildInteractiveShellCommand } from "../../src/launch/shell-command.ts";
 import { assert, describe, it, createTestDir, createSessionFile, SESSION_HEADER, MODEL_CHANGE, USER_MSG,
-	ASSISTANT_MSG, join, readFileSync, writeFileSync, existsSync, readSubagentLaunchMetadataForTest } from "../support/index.ts";
+	ASSISTANT_MSG, join, readFileSync, writeFileSync, writeExecutable, existsSync, readSubagentLaunchMetadataForTest } from "../support/index.ts";
 import { REX_CHILD, REX_PARENT, REX_SESSION, useFakeRex } from "../support/rex.ts";
 import "../support/ambient-spawn-grant.ts";
 
@@ -69,6 +71,7 @@ describe("Rex interactive launch integration", () => {
 		const first = await launchInteractiveSubagent(params, f.ctx, runtime);
 		disposeEnvCapsule(capsuleFrom(f.calls()).path);
 		const resumed = await resumeSubagentSession({ sessionFile: first.sessionFile, task: "Continue." }, resumeRuntime());
+		assert.equal(typeof resumed.disposeLaunchCapsule, "function");
 		assert.equal(resumed.surface, REX_CHILD);
 		assert.deepEqual(resumed.rexTarget, { sessionId: REX_SESSION, blockId: REX_CHILD, parentBlockId: REX_PARENT });
 		const capsule = capsuleFrom(f.calls());
@@ -76,7 +79,8 @@ describe("Rex interactive launch integration", () => {
 			const data = JSON.parse(readFileSync(capsule.path, "utf8"));
 			assert.deepEqual(data.rexParent, { sessionId: REX_SESSION, blockId: REX_PARENT });
 			assert.ok(data.args.includes(first.sessionFile));
-		} finally { disposeEnvCapsule(capsule.path); }
+		} finally { await stopRunningSubagent(resumed); }
+		assert.equal(existsSync(capsule.path), false);
 		process.env.PI_SUBAGENT_MUX = "herdr";
 		await assert.rejects(resumeSubagentSession({ sessionFile: first.sessionFile }, resumeRuntime()), /Cannot resume rex child/);
 	});
@@ -112,30 +116,165 @@ describe("Rex interactive launch integration", () => {
 		assert.equal(f.calls().filter((call) => call[1] === "split").length, before);
 	});
 
+	it("allows saved Herdr resumes and timeout restarts in tmux but blocks entry into Rex", async () => {
+		const f = launchFixture();
+		const first = await launchInteractiveSubagent(params, f.ctx, runtime);
+		first.disposeLaunchCapsule?.();
+		const entries = readFileSync(first.sessionFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		for (const entry of entries) {
+			if (entry.customType === "pi-subagents_launch_metadata") {
+				entry.data.muxBackend = "herdr";delete entry.data.rexSessionId;
+			}
+		}
+		writeFileSync(first.sessionFile, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+		await assert.rejects(resumeSubagentSession({ sessionFile: first.sessionFile }, resumeRuntime()), /Cannot resume herdr child in rex/);
+		delete process.env.REX_SESSION;delete process.env.REX_BLOCK;
+		process.env.PI_SUBAGENT_MUX = "tmux";process.env.TMUX = "fake";delete process.env.TMUX_PANE;
+		writeExecutable(f.dir, "tmux", "#!/bin/sh\nprintf '%%9\\n'\n");
+		const resumed = await resumeSubagentSession({ sessionFile: first.sessionFile }, { ...resumeRuntime(), getShellReadyDelayMs: () => 0 });
+		assert.equal(resumed.surface, "%9");
+		assert.equal(resumed.rexTarget, undefined);
+		resumed.timeoutWrapUp = { kind: "timeout", seconds: 10, threshold: 80 };
+		await restartSubagentForTimeoutWrapUp(resumed, { getShellReadyDelayMs: () => 0 });
+		assert.equal(resumed.surface, "%9");
+		await stopRunningSubagent(resumed);
+	});
+
 	it("runtime kill closes recorded child after parent block disappears", async () => {
 		const f = launchFixture();
 		const running = await launchInteractiveSubagent(params, f.ctx, runtime);
-		disposeEnvCapsule(capsuleFrom(f.calls()).path);
+		const capsule = capsuleFrom(f.calls()).path;
+		assert.equal(existsSync(capsule), true);
 		f.setState({ parentGone: true });
 		delete process.env.REX_SESSION;delete process.env.REX_BLOCK;
 		await stopRunningSubagent(running);
 		assert.equal(running.surface, undefined);
+		assert.equal(existsSync(capsule), false);
+		assert.equal(running.disposeLaunchCapsule, undefined);
 		assert.ok(f.calls().some((args) => args[1] === "block" && args[2] === "close" && args[3] === REX_CHILD));
 	});
 
 	it("timeout replacement retains fresh Rex ownership and launch title", async () => {
 		const f = launchFixture();
 		const running = await launchInteractiveSubagent(params, f.ctx, runtime);
-		disposeEnvCapsule(capsuleFrom(f.calls()).path);
+		const firstCapsule = capsuleFrom(f.calls()).path;
 		running.timeoutWrapUp = { kind: "timeout", seconds: 10, threshold: 80 };
 		await restartSubagentForTimeoutWrapUp(running, runtime);
+		assert.equal(existsSync(firstCapsule), false);
+		assert.equal(typeof running.disposeLaunchCapsule, "function");
 		const capsule = capsuleFrom(f.calls());
 		try {
 			assert.deepEqual(running.rexTarget, { sessionId: REX_SESSION, blockId: REX_CHILD, parentBlockId: REX_PARENT });
 			const data = JSON.parse(readFileSync(capsule.path, "utf8"));
 			assert.equal(data.overrides.PI_SUBAGENT_INITIAL_TITLE, running.launchMetadata?.sessionTitle);
 			assert.equal(data.overrides.PI_SUBAGENT_TIMEOUT_WRAP_UP, "1");
-		} finally { disposeEnvCapsule(capsule.path); }
+		} finally { await stopRunningSubagent(running); }
+		assert.equal(existsSync(capsule.path), false);
+	});
+
+	it("reaps unconsumed capsule on pre-runner failure and captures own diagnostics before close", async () => {
+		const f = launchFixture();
+		const running = await launchInteractiveSubagent(params, f.ctx, runtime);
+		const capsule = capsuleFrom(f.calls()).path;
+		const result = await watchSubagent(running, {
+			cleanupNoSessionSessionFile: () => {},
+			closeRunningSurface: stopRunningSubagent,
+			pollForExit: async () => ({ reason: "sentinel", exitCode: 127 }),
+		}, new AbortController().signal);
+		assert.equal(result.exitCode, 127);
+		assert.match(result.summary, /Rex terminal output \(exit 127\)/);
+		assert.match(result.summary, /line two/);
+		assert.equal(existsSync(capsule), false);
+		const calls = f.calls();
+		assert.ok(calls.findIndex((args) => args.includes("capture")) < calls.findIndex((args) => args.includes("close")));
+	});
+
+	it("bounds diagnostics and preserves terminal exit across slow or failed capture", async () => {
+		for (const state of [{ screen: "x".repeat(8000), captureDelay: 1100 }, { captureFail: true }]) {
+			const f = launchFixture();
+			const running = await launchInteractiveSubagent(params, f.ctx, runtime);
+			running.startTime = Date.now();running.timeoutBudget = { timeoutSeconds: 1 };
+			f.setState(state);
+			const result = await watchSubagent(running, {
+				cleanupNoSessionSessionFile: () => {}, closeRunningSurface: stopRunningSubagent,
+				pollForExit: async () => ({ reason: "sentinel", exitCode: 127 }),
+			}, new AbortController().signal);
+			assert.equal(result.exitCode, 127);
+			assert.equal(result.timedOut, undefined);
+			assert.ok(result.summary.length < 4200);
+		}
+	});
+
+	it("preserves a useful child report instead of classifying every nonzero result as a launch failure", async () => {
+		const f = launchFixture();
+		const running = await launchInteractiveSubagent(params, f.ctx, runtime);
+		writeFileSync(running.sessionFile, readFileSync(running.sessionFile, "utf8") + JSON.stringify({
+			type: "message", id: "own-report", message: { role: "assistant", content: [{ type: "text", text: "Model could not finish this task." }] },
+		}) + "\n");
+		const result = await watchSubagent(running, {
+			cleanupNoSessionSessionFile: () => {}, closeRunningSurface: stopRunningSubagent,
+			pollForExit: async () => ({ reason: "sentinel", exitCode: 1 }),
+		}, new AbortController().signal);
+		assert.equal(result.exitCode, 1);
+		assert.match(result.summary, /Model could not finish/);
+		assert.doesNotMatch(result.summary, /Rex terminal output/);
+		assert.ok(!f.calls().some((args) => args.includes("capture")));
+	});
+
+	it("disposes capsules on watcher error and cancellation even when close fails", async () => {
+		for (const abort of [false, true]) {
+			const f = launchFixture();
+			const running = await launchInteractiveSubagent(params, f.ctx, runtime);
+			const capsule = capsuleFrom(f.calls()).path;
+			const controller = new AbortController();if (abort) controller.abort();
+			await watchSubagent(running, {
+				cleanupNoSessionSessionFile: () => {},
+				closeRunningSurface: async () => { throw new Error("close unavailable"); },
+				pollForExit: async () => { throw new Error("wait unavailable"); },
+			}, controller.signal);
+			assert.equal(existsSync(capsule), false);
+			assert.equal(running.disposeLaunchCapsule, undefined);
+		}
+	});
+
+	it("shutdown preserves a continue child's capsule but disposes a terminated child's capsule", async () => {
+		for (const policy of ["continue", "terminate"] as const) {
+			const f = launchFixture();
+			const running = await launchInteractiveSubagent(params, f.ctx, runtime);
+			running.parentClosePolicy = policy;
+			const capsule = capsuleFrom(f.calls()).path;
+			let closed = 0;
+			await shutdownSubagentsForParentExit({
+				runningSubagents: new Map([[running.id, running]]), completedSubagentResults: new Map(),
+				parentCloseEscalationMs: 10, updateWidget: () => {},
+				closeRunningSurface: async () => { closed++;throw new Error("close failed"); },
+			});
+			assert.equal(existsSync(capsule), policy === "continue");
+			assert.equal(closed, policy === "continue" ? 0 : 1);
+			running.disposeLaunchCapsule?.();
+		}
+	});
+
+	it("rejects a missing standalone runtime before creating a block or capsule", async () => {
+		const f = launchFixture();const old = process.execPath;
+		const root = process.env.PI_SUBAGENT_ENV_CAPSULE_DIR!;const before = readdirSync(root);
+		try {
+			process.execPath = "/removed/pi";
+			await assert.rejects(launchInteractiveSubagent(params, f.ctx, runtime), /Restart Pi/);
+			assert.ok(!f.calls().some((args) => args[1] === "split"));
+			assert.deepEqual(readdirSync(root), before);
+		} finally { process.execPath = old; }
+	});
+
+	it("disposes both old and replacement capsules when timeout restart cannot create its block", async () => {
+		const f = launchFixture();const root = process.env.PI_SUBAGENT_ENV_CAPSULE_DIR!;
+		const before = readdirSync(root);
+		const running = await launchInteractiveSubagent(params, f.ctx, runtime);
+		running.timeoutWrapUp = { kind: "timeout", seconds: 10, threshold: 80 };
+		f.setState({ splitFail: true });
+		await assert.rejects(restartSubagentForTimeoutWrapUp(running, runtime));
+		assert.deepEqual(readdirSync(root), before);
+		assert.equal(running.disposeLaunchCapsule, undefined);
 	});
 
 	it("disposes private capsule when native creation fails", async () => {

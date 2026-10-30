@@ -2,7 +2,8 @@ import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { traceSubagentLaunch } from "../launch/trace.ts";
 import type { PollResult } from "../mux/poll.ts";
 import { isZellijSurfaceLive } from "../mux/zellij-runtime.ts";
-import { consumeSubagentExitSignal, getMuxBackend, pollForExit } from "../mux.ts";
+import { disposeSubagentLaunchCapsule } from "../launch/env-capsule.ts";
+import { consumeSubagentExitSignal, getMuxBackend, pollForExit, readScreenAsync } from "../mux.ts";
 import { hasSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { getInteractiveProcessFile } from "../session/interactive-process.ts";
 import { findLastSubagentOutputWithSource, getEntryCount, getNewEntries } from "../session/session.ts";
@@ -181,6 +182,7 @@ export async function watchSubagent(
 			}
 		}
 	} finally {
+		disposeSubagentLaunchCapsule(running);
 		runtime.cleanupNoSessionSessionFile(running);
 	}
 }
@@ -286,7 +288,15 @@ async function watchInteractiveGeneration(
 			return { kind: "restart" };
 		}
 		const elapsed = Math.floor((Date.now() - startTime) / 1000);
-		const { summary, summarySource } = getSummary(running, pollResult);
+		let { summary, summarySource } = getSummary(running, pollResult);
+		if (pollResult.exitCode !== 0 && summarySource === "runtime" && running.rexTarget) {
+			// The child has already finished; diagnostic I/O must not turn its failure into a timeout.
+			if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = undefined; }
+			try {
+				const screen = (await readScreenAsync(surface, 20, running.rexTarget)).trim().slice(-4000);
+				if (screen) summary += `\n\nRex terminal output (exit ${pollResult.exitCode}):\n${screen}`;
+			} catch { /* Diagnostics must not replace the child's original status. */ }
+		}
 		const errorMessage = pollResult.reason === "error" ? pollResult.errorMessage : undefined;
 		const finalContextUsage = resolveFinalContextUsage(running, pickFinalUsageSource(pollResult, exitSignal));
 		const timeoutFields = recordTimeoutOutcome(running, pollResult);
@@ -373,6 +383,7 @@ async function watchInteractiveGeneration(
 		};
 	} finally {
 		if (deadlineTimer) clearTimeout(deadlineTimer);
+		disposeSubagentLaunchCapsule(running);
 	}
 }
 

@@ -29,7 +29,9 @@ if (op === 'block' && args[2] === 'inspect') {
 } else if (op === 'split') {
  if (state.splitFail) process.exit(3);
  json({session_id:${JSON.stringify(REX_SESSION)},anchor_id:state.badAnchor ? 'other' : args[args.indexOf('-b')+1],block_ids:[state.parentAsChild ? ${JSON.stringify(REX_PARENT)} : ${JSON.stringify(REX_CHILD)}]});
-} else if (op === 'capture') { console.log('line one\\nline two');
+} else if (op === 'capture') {
+ if (state.captureFail) process.exit(3);
+ setTimeout(() => console.log(state.screen ?? 'line one\\nline two'), state.captureDelay ?? 0);
 } else if (op === 'wait') {
  fs.writeFileSync(${JSON.stringify(join(dir, "wait.pid"))}, String(process.pid));
  if (state.waitSidecar) fs.writeFileSync(state.waitSidecar, JSON.stringify({type:'done',outputTokens:9}));

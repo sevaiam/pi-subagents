@@ -266,7 +266,7 @@ export function createSurfaceSplit(
 	return createHerdrSplit(name, direction, fromSurface);
 }
 
-export function renameCurrentTab(title: string): void {
+export function renameCurrentTab(title: string): boolean | void {
 	const backend = requireMuxBackend();
 	if (backend === "rex") return renameRexChild(title);
 	if (backend === "cmux") {

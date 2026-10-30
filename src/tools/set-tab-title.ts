@@ -50,7 +50,13 @@ export function registerSetTabTitleTool(pi: ExtensionAPI): void {
 				});
 			}
 			try {
-				renameCurrentTab(params.title);
+				const changed = renameCurrentTab(params.title);
+				if (changed === false) {
+					return asSubagentToolResult({
+						content: [{ type: "text" as const, text: "Title unchanged: preserving a manual title or a block not owned by this child." }],
+						details: { changed: false },
+					});
+				}
 				renameWorkspace(params.title);
 				return asSubagentToolResult({
 					content: [{ type: "text" as const, text: `Title set to: ${params.title}` }],

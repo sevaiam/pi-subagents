@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { basename } from "node:path";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { basename, delimiter, join, resolve, win32 } from "node:path";
 import { buildParentEnvSnapshot } from "./child-env.ts";
 
 export interface PiInvocation {
@@ -52,6 +52,37 @@ export function parseCommandWords(command: string): string[] {
 	return words;
 }
 
+/** Recover a removed Node/Bun executable without changing runtime family or evaluating a shell. */
+export function resolveRuntimeExecutable(
+	execPath = process.execPath,
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+): string {
+	const executable = (path: string): boolean => {
+		try {
+			accessSync(path, platform === "win32" ? constants.F_OK : constants.X_OK);
+			return statSync(path).isFile();
+		} catch { return false; }
+	};
+	if (executable(execPath)) return execPath;
+	const name = (platform === "win32" ? win32.basename(execPath) : basename(execPath)).toLowerCase();
+	const family = /^(node|bun)(?:\.exe)?$/.exec(name)?.[1];
+	if (family) {
+		const extensions = platform === "win32"
+			? (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => /^\.(?:exe|com)$/i.test(ext))
+			: [""];
+		for (const entry of (env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : delimiter)) {
+			const dir = entry.replace(/^"(.*)"$/, "$1");
+			if (!dir) continue;
+			for (const ext of extensions) {
+				const candidate = resolve(join(dir, family + ext));
+				if (executable(candidate)) return candidate;
+			}
+		}
+	}
+	throw new Error(`Subagent runtime is unavailable: ${execPath}. Restart Pi from an installed executable${family ? ` or put ${family} on PATH` : ""}. No child was launched.`);
+}
+
 /**
  * Resolve the correct pi binary path for spawn(). Handles node, bun,
  * bundled executables, and opt-in wrapper commands.
@@ -66,16 +97,17 @@ export function getPiInvocation(args: string[]): PiInvocation {
 		return { command: parts[0], args: [...parts.slice(1), ...args] };
 	}
 
+	const runtime = resolveRuntimeExecutable();
 	const currentScript = process.argv[1];
 	if (currentScript && existsSync(currentScript)) {
-		return { command: process.execPath, args: [currentScript, ...args] };
+		return { command: runtime, args: [currentScript, ...args] };
 	}
 	const execName = basename(process.execPath).toLowerCase();
 	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
 	if (!isGenericRuntime) {
-		return { command: process.execPath, args };
+		return { command: runtime, args };
 	}
-	return { command: "pi", args };
+	throw new Error("Cannot locate the parent Pi script. Restart Pi from its installed entrypoint or set PI_SUBAGENT_PI_COMMAND explicitly; refusing to guess a different Pi binary.");
 }
 
 export function getSubagentChildProcessEnv(

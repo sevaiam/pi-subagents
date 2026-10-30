@@ -30,6 +30,14 @@ export interface EnvCapsule {
 	rexParent?: { sessionId: string; blockId: string };
 }
 
+/** Release only this generation's capsule; consumed capsules already no longer exist. */
+export function disposeSubagentLaunchCapsule(running: { disposeLaunchCapsule?: () => void }): void {
+	const dispose = running.disposeLaunchCapsule;
+	if (!dispose) return;
+	dispose();
+	if (running.disposeLaunchCapsule === dispose) running.disposeLaunchCapsule = undefined;
+}
+
 export const ENV_CAPSULE_DIR_PREFIX = "pi-subagent-env-";
 const ENV_CAPSULE_FILE_NAME = "capsule.json";
 export const DEFAULT_ENV_CAPSULE_MAX_AGE_MS = 60 * 60 * 1000;

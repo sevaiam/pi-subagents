@@ -1,3 +1,4 @@
+import { disposeSubagentLaunchCapsule } from "../launch/env-capsule.ts";
 import type { CompletedSubagentResult, ParentClosePolicy, ParentShutdownAction, RunningSubagent } from "../types.ts";
 import { clearSubagentShutdownTimer } from "./state.ts";
 
@@ -42,7 +43,9 @@ async function terminateInteractiveSubagent(running: RunningSubagent, runtime: S
 	running.abortController?.abort();
 	try {
 		await runtime.closeRunningSurface(running);
-	} catch {}
+	} catch {} finally {
+		disposeSubagentLaunchCapsule(running);
+	}
 }
 
 export async function shutdownSubagentsForParentExit(

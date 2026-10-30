@@ -7,6 +7,7 @@ import { getPiInvocation, getSubagentChildProcessEnv } from "../launch/child-com
 import { type InteractiveLaunchRuntime, launchInteractiveSubagent } from "../launch/interactive.ts";
 import type { SubagentLaunchContext } from "../launch/prep.ts";
 import { cleanupNoSessionSessionFile } from "../launch/prep.ts";
+import { disposeSubagentLaunchCapsule } from "../launch/env-capsule.ts";
 import { closeSurfaceAsync } from "../mux/io.ts";
 import { closeSurface } from "../mux.ts";
 import type {
@@ -105,7 +106,7 @@ export function renderSubagentWidgetForTest() {
 
 async function closeRunningSurface(running: RunningSubagent): Promise<void> {
 	if (running.surfaceClosePromise) return running.surfaceClosePromise;
-	if (!running.surface) return;
+	if (!running.surface) { disposeSubagentLaunchCapsule(running); return; }
 	const surface = running.surface;
 	const closePromise = closeSurfaceAsync(surface, running.zellijTarget, running.rexTarget);
 	running.surfaceClosePromise = closePromise;
@@ -113,6 +114,7 @@ async function closeRunningSurface(running: RunningSubagent): Promise<void> {
 		await closePromise;
 		if (running.surface === surface) running.surface = undefined;
 	} finally {
+		disposeSubagentLaunchCapsule(running);
 		if (running.surfaceClosePromise === closePromise) running.surfaceClosePromise = undefined;
 	}
 }

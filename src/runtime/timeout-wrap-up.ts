@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getArtifactStorageRoot } from "../artifact-storage.ts";
 import { buildAppendSystemInheritancePlan } from "../launch/append-system.ts";
-import { getPiInvocation, getSubagentChildProcessEnv } from "../launch/child-command.ts";
+import { disposeSubagentLaunchCapsule } from "../launch/env-capsule.ts";
+import { getPiInvocation, getSubagentChildProcessEnv, resolveRuntimeExecutable } from "../launch/child-command.ts";
 import { resolveDenyEnvPatterns } from "../launch/child-env.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "../launch/context-boundary.ts";
 import { parseEnvString } from "../launch/env.ts";
@@ -154,6 +155,7 @@ export async function restartSubagentForTimeoutWrapUp(
 	runtime: TimeoutWrapUpRuntime,
 	signal?: AbortSignal,
 ): Promise<void> {
+	disposeSubagentLaunchCapsule(running); // Previous generation has already been stopped.
 	const launch = await getWrapUpLaunchParts(running, signal);
 	throwIfAborted(signal);
 	clearSubagentExitSidecar(running.sessionFile);
@@ -188,9 +190,11 @@ export async function restartSubagentForTimeoutWrapUp(
 		return;
 	}
 
+	resolveRuntimeExecutable();
+	getPiInvocation([]);
 	const metadata = running.launchMetadata!;
 	const backend = getMuxBackend();
-	if (metadata.muxBackend && metadata.muxBackend !== backend) {
+	if (metadata.muxBackend && metadata.muxBackend !== backend && (metadata.muxBackend === "rex" || backend === "rex")) {
 		throw new Error(`Cannot restart ${metadata.muxBackend} child in ${backend ?? "unknown"} context`);
 	}
 	const rexTarget = backend === "rex" ? requireRexCaller() : undefined;
@@ -242,6 +246,7 @@ export async function restartSubagentForTimeoutWrapUp(
 			...(rexTarget ? { rexParent: rexTarget } : {}),
 		});
 		disposeCapsule = dispose;
+		running.disposeLaunchCapsule = dispose;
 		if (rexTarget) {
 			surface = createRexCommandSurface(metadata.sessionTitle ?? running.title ?? running.name, argv, launch.cwd ?? process.cwd());
 			running.surface = surface;
@@ -267,6 +272,7 @@ export async function restartSubagentForTimeoutWrapUp(
 	} catch (error) {
 		// Nothing consumed the capsule; do not leave credentials behind.
 		disposeCapsule?.();
+		disposeSubagentLaunchCapsule(running);
 		if (surface) {
 			try {
 				await closeSurfaceAsync(surface, zellijTarget, running.rexTarget);

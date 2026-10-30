@@ -1,4 +1,5 @@
 import { outstandingWork } from "./outstanding-work.ts";
+import { disposeSubagentLaunchCapsule } from "../launch/env-capsule.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { CompletedSubagentResult, RunningSubagent, StartedSubagentToolDetails, SubagentResult } from "../types.ts";
 import { deliverCompletedSubagentResult, routeSubagentOutcome } from "./result-router.ts";
@@ -124,7 +125,9 @@ export async function stopRunningSubagent(
 	}
 	try {
 		await closeSurface(running);
-	} catch {}
+	} catch {} finally {
+		disposeSubagentLaunchCapsule(running);
+	}
 	releaseSpawnWidthSlot(running);
 }
 

@@ -2,7 +2,7 @@
 // Real Rex contract smoke. No model requests, authentication copies, or user panes.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -15,6 +15,8 @@ const { createRexCommandSurface, closeRexSurface, rexChildTarget, waitForRexExit
 const { getMuxBackend } = await import("../src/mux/core.ts");
 const { pollForExit } = await import("../src/mux/poll.ts");
 const { buildInteractiveShellCommand } = await import("../src/launch/shell-command.ts");
+const { watchSubagent } = await import("../src/runtime/interactive-watch.ts");
+const { registerSetTabTitleTool } = await import("../src/tools/set-tab-title.ts");
 const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-rex-mux-smoke-")));
 const children = new Map();
 const rex = (...args) => execFileSync("rex", ["--autostart=false", ...args], { encoding: "utf8", timeout: 15_000 });
@@ -87,6 +89,58 @@ try {
   } finally { launch.dispose(); }
   console.log("PASS: exact capsule argv, cwd, and fresh child identity");
 
+  const originalRuntime = process.execPath;
+  const originalScript = process.argv[1];
+  const originalOverride = process.env.PI_SUBAGENT_PI_COMMAND;
+  const missingRuntime = join(root, "removed-cellar", "node");
+  let recovered;
+  try {
+    process.execPath = missingRuntime;
+    process.argv[1] = childScript;
+    delete process.env.PI_SUBAGENT_PI_COMMAND;
+    recovered = buildInteractiveShellCommand({ cwd: root, piArgs: ["runtime recovered"],
+      envOverrides: { PI_TEST_PROBE_FILE: resultFile }, doneSentinelFile: join(root, "recovered-done"), rexParent: parent });
+  } finally {
+    process.execPath = originalRuntime;
+    process.argv[1] = originalScript;
+    if (originalOverride === undefined) delete process.env.PI_SUBAGENT_PI_COMMAND;
+    else process.env.PI_SUBAGENT_PI_COMMAND = originalOverride;
+  }
+  try {
+    assert.notEqual(recovered.argv[0], missingRuntime);
+    assert.ok(existsSync(recovered.argv[0]));
+    const block = create(recovered.argv, "Recovered runtime child");
+    assert.equal(await waitForRexExit(block, new AbortController().signal, children.get(block)), 0);
+    assert.deepEqual(JSON.parse(readFileSync(resultFile, "utf8")).args, ["runtime recovered"]);
+    close(block);
+  } finally { recovered?.dispose(); }
+  console.log("PASS: removed runtime recovers through PATH for launcher and child");
+
+  // A valid executable that exits before reading the capsule models a pre-runner failure.
+  const failedRuntime = join(root, "pre-runner-failure");
+  writeFileSync(failedRuntime, "#!/bin/sh\nprintf '%s\\n' 'intentional pre-runner failure' >&2\nexit 127\n", { mode: 0o700 });
+  let failed;
+  try {
+    process.execPath = failedRuntime;
+    failed = buildInteractiveShellCommand({ cwd: root, piArgs: [], envOverrides: {},
+      doneSentinelFile: join(root, "failed-done"), rexParent: parent });
+  } finally { process.execPath = originalRuntime; }
+  try {
+    const block = create(failed.argv, "Pre-runner failure child");
+    assert.ok(existsSync(failed.capsulePath));
+    const state = { name: "failure-probe", task: "Check cleanup", mode: "interactive", startTime: Date.now(),
+      sessionFile: join(root, "failure-session.jsonl"), surface: block, rexTarget: children.get(block),
+      doneSentinelFile: join(root, "failed-done"), disposeLaunchCapsule: failed.dispose };
+    const result = await watchSubagent(state, {
+      closeRunningSurface: async () => close(block), cleanupNoSessionSessionFile: () => {},
+    }, new AbortController().signal);
+    assert.equal(result.exitCode, 127);
+    assert.match(result.summary, /intentional pre-runner failure/);
+    assert.equal(existsSync(failed.capsulePath), false);
+    assert.equal(state.disposeLaunchCapsule, undefined);
+  } finally { failed?.dispose(); }
+  console.log("PASS: pre-runner failure retains diagnostics and disposes capsule");
+
   const named = create([process.execPath, "-e", "setInterval(()=>{},1000)"], "[s] [worker] Launch task");
   process.env.REX_BLOCK = named;
   process.env.PI_SUBAGENT_NAME = "smoke-worker";
@@ -97,6 +151,19 @@ try {
   rex("block", "rename", "-s", session, named, "[s] [worker] Manual user title");
   renameRexChild("Do not overwrite");
   assert.equal(json("block", "inspect", "-s", session, named, "--json").block.label, "[s] [worker] Manual user title");
+  const previousTitleOptIn = process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE;
+  try {
+    process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE = "1";
+    let titleTool;
+    registerSetTabTitleTool({ registerTool: (tool) => { titleTool = tool; } });
+    const result = await titleTool.execute("manual-title-probe", { title: "Do not overwrite" });
+    assert.equal(result.details.changed, false);
+    assert.match(result.content[0].text, /^Title unchanged:/);
+    assert.equal(json("block", "inspect", "-s", session, named, "--json").block.label, "[s] [worker] Manual user title");
+  } finally {
+    if (previousTitleOptIn === undefined) delete process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE;
+    else process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE = previousTitleOptIn;
+  }
   process.env.REX_BLOCK = anchor;
   for (const key of ["PI_SUBAGENT_NAME", "PI_SUBAGENT_SURFACE", "PI_SUBAGENT_INITIAL_TITLE"]) delete process.env[key];
   close(named);

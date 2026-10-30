@@ -2,7 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shellEscape } from "../mux.ts";
 import { getInteractiveProcessFile } from "../session/interactive-process.ts";
-import { getPiInvocation } from "./child-command.ts";
+import { getPiInvocation, resolveRuntimeExecutable } from "./child-command.ts";
 import { buildParentEnvSnapshot, PANE_IDENTITY_ENV_PATTERNS, resolveDenyEnvPatterns } from "./child-env.ts";
 import { disposeEnvCapsule, writeEnvCapsule } from "./env-capsule.ts";
 import { buildInteractiveSentinelShellCommands } from "./interactive-sentinel.ts";
@@ -29,8 +29,8 @@ export interface InteractiveShellCommand {
 	argv: string[];
 	capsulePath: string;
 	/**
-	 * Delete the capsule. Call only when the launch failed before the pane's
-	 * launcher could consume it; after a successful send the pane owns the file.
+	 * Idempotent cleanup for failed launches and finished/stopped supervision.
+	 * Keep it on RunningSubagent until the child consumes the capsule or finishes.
 	 */
 	dispose: () => void;
 }
@@ -48,6 +48,9 @@ export function getRunChildLauncherPath(): string {
  * inside the one-shot capsule, which the launcher unlinks before spawning.
  */
 export function buildInteractiveShellCommand(input: InteractiveShellCommandInput): InteractiveShellCommand {
+	// Resolve the launcher and inferred Pi runtime before writing inherited environment.
+	// Explicit PI_SUBAGENT_PI_COMMAND wrappers keep their existing invocation contract.
+	const runtime = resolveRuntimeExecutable();
 	const invocation = getPiInvocation(input.piArgs);
 	const capsulePath = writeEnvCapsule({
 		command: invocation.command,
@@ -61,10 +64,10 @@ export function buildInteractiveShellCommand(input: InteractiveShellCommandInput
 		...(input.rexParent ? { rexParent: input.rexParent } : {}),
 	});
 	const sentinel = buildInteractiveSentinelShellCommands(input.doneSentinelFile);
-	const launcher = `${shellEscape(process.execPath)} ${shellEscape(getRunChildLauncherPath())} ${shellEscape(capsulePath)}`;
+	const launcher = `${shellEscape(runtime)} ${shellEscape(getRunChildLauncherPath())} ${shellEscape(capsulePath)}`;
 	const command =
 		`trap ${shellEscape(sentinel.exitTrap)} EXIT; ` +
 		`${buildShellChangeDirectoryPrefix(input.cwd)}${launcher}; ${sentinel.direct}`;
-	return { command, argv: [process.execPath, getRunChildLauncherPath(), capsulePath], capsulePath,
+	return { command, argv: [runtime, getRunChildLauncherPath(), capsulePath], capsulePath,
 		dispose: () => disposeEnvCapsule(capsulePath) };
 }

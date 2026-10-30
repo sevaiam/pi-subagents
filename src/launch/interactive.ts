@@ -13,6 +13,7 @@ import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import { buildAppendSystemInheritancePlan } from "./append-system.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
+import { getPiInvocation, resolveRuntimeExecutable } from "./child-command.ts";
 import { buildInteractiveShellCommand } from "./shell-command.ts";
 import { PI_SUBAGENT_TIMEOUT_STARTED_AT } from "../tools/timeout-reminders.ts";
 import {
@@ -65,6 +66,8 @@ export async function launchInteractiveSubagent(
 		skills: prepared.effectiveSkills,
 		injectSkills: prepared.effectiveInjectSkills,
 	});
+	resolveRuntimeExecutable(); // Fail before creating a pane or writing a private capsule.
+	getPiInvocation([]);
 	const surfacePreCreated = !!options?.surface;
 	const surfaceName = prepared.sessionTitle ?? params.name;
 	const herdrContext = {
@@ -247,6 +250,7 @@ export async function launchInteractiveSubagent(
 		modelRef: prepared.effectiveModelRef,
 		launchMetadata: launch.launchMetadata,
 		doneSentinelFile,
+		disposeLaunchCapsule: dispose,
 		zellijTarget,
 		rexTarget: rexTarget ? rexChildTarget(rexTarget, surface) : undefined,
 	};

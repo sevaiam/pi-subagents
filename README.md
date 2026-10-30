@@ -23,9 +23,13 @@ Special thanks to [@FasalZein](https://github.com/FasalZein) and [@isthatyousaf]
 
 ## Install
 
+The Rex backend and launcher fixes are on `noticket/rex-backend`. The fork's `main` branch tracks upstream.
+
 ```bash
-pi install git:github.com/sevaiam/pi-subagents
+pi install git:github.com/sevaiam/pi-subagents@noticket/rex-backend
 ```
+
+If upstream `edxeth/pi-subagents` is already configured, replace that package declaration instead of loading both packages. They register the same tool names. Restart Pi after changing the launcher package.
 
 ## The model
 
@@ -50,7 +54,9 @@ Interactive children open in your current terminal backend. `pi-subagents` suppo
 
 Start `pi` inside the backend you want to use. Leave `PI_SUBAGENT_MUX` unset to detect it, or set it to `rex`, `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` to select one.
 
-The backend command must exist, and Pi must have a valid caller identity. Rex requires `REX_SESSION` and `REX_BLOCK`. Herdr requires `HERDR_ENV=1` and `HERDR_PANE_ID`. Mixed, incomplete, stale, or conflicting identities fail before creating a child. A running Herdr server alone does not select Herdr. Rex never falls back to Herdr, including when the Rex CLI is missing or a launch fails.
+For an interactive UI launch, the backend command must exist and Pi must have a valid caller identity. Rex requires `REX_SESSION` and `REX_BLOCK`. Herdr requires `HERDR_ENV=1` and `HERDR_PANE_ID`. Mixed, incomplete, stale, or conflicting identities and invalid explicit backend preferences produce an error instead of a background child. A running Herdr server alone does not select Herdr. Rex never falls back to Herdr, including when the Rex CLI is missing or a launch fails.
+
+Explicit background agents, headless parents, and verifier runs retain their background behavior. A UI without any mux identity or preference retains the existing headless fallback.
 
 Normal launches use a backend-specific surface. Herdr keeps children beside the parent while the tab has room, then uses dedicated tabs for overflow. Every Herdr child pane is labeled with its session title, such as `[reviewer] Auth implementation review`. Other backends may use windows, splits, or stacked panes.
 
@@ -903,6 +909,10 @@ The wrapper applies to new children and resumed children. Quoted paths work:
 PI_SUBAGENT_PI_COMMAND="'/path with spaces/my-wrapper' pi" pi
 ```
 
+Interactive launches validate the parent runtime before writing a private environment capsule or creating a pane. If a running session's Node or Bun executable was removed, the launcher searches executable PATH entries for the same runtime family. It does not switch from Node to Bun or guess another Pi entrypoint. If the runtime cannot be found, restart Pi. If the parent Pi script was removed, restart Pi or set an explicit `PI_SUBAGENT_PI_COMMAND` wrapper.
+
+The child consumes its private capsule before it starts Pi. Completion, failure, stop, and termination clean up any capsule that the child did not consume. A `parent-close-policy: continue` child keeps its pending capsule when the parent exits.
+
 ## Environment variables
 
 User-facing knobs:
@@ -960,7 +970,11 @@ The child receives the existing parent-environment snapshot and its own Rex sess
 
 Rex uses `rex wait` to observe process exit, including terminals kept open after exit. Durable child completion and `caller_ping` signals take priority over process exit. The supervisor retains the child's owning session and block so it can clean up its own child after the parent block disappears. It never closes unrelated blocks.
 
-The optional `set_tab_title` tool names only the child block. It does not rename a shared Rex window or project session. Existing model/title extensions remain responsible for their model-tag and task-title policy.
+Parent callbacks and automatic child cleanup apply to children launched by this extension. A manually opened root Pi window does not become a tracked child and stays open after its model turn. A child with `auto-exit: false` or operator takeover can also stay open. See [Child lifecycle](#child-lifecycle).
+
+Recorded Rex children can resume only in their original Rex project session. Resumes between Rex and another recorded backend are rejected. Existing cross-backend resumes that do not involve Rex remain allowed.
+
+The optional `set_tab_title` tool names only the child block. It does not rename a shared Rex window or project session. It reports `Title unchanged` when a manual title or ownership check prevents a rename. Existing model/title extensions remain responsible for their model-tag and task-title policy.
 
 ## Herdr placement
 
@@ -1108,8 +1122,9 @@ The development checks used upstream commit `cf6dbf4` as the comparison baseline
 - Type checking and file-size checks passed.
 - Eight real interactive parent/child cases passed: Sol, Astra, Fable, and Opus in both Rex and Herdr. These are user-configured model aliases, not required provider IDs.
 - Real Rex resume passed for both lineage-only and standalone child sessions.
-- The guarded Rex CLI smoke passed, including cancellation, manual-title protection, and cleanup after parent removal.
-- The non-verifier test run had 1,000 passes, five failures, and four skips. The untouched baseline had 977 passes, the same five failures, and four skips. The failures concerned a macOS temporary-path assertion and skill fixtures.
+- A real Rex `caller_ping` callback woke the parent, which resumed the child. Both the original and resumed child blocks were cleaned up.
+- The guarded Rex CLI smoke passed, including cancellation, manual-title protection, cleanup after parent removal, recovery from a removed runtime path, and capsule cleanup with diagnostics after a pre-runner failure.
+- The non-verifier test run had 1,018 passes, five failures, and four skips. The untouched baseline had 977 passes, the same five failures, and four skips. The failures concerned a macOS temporary-path assertion and skill fixtures.
 - The full `npm test` run encountered a verifier provisioning timeout. The same test timed out on the untouched baseline. This record does not claim a fully passing test suite.
 
 ## Credits

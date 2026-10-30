@@ -149,7 +149,7 @@ describe("coordinator-turn launch hardening", () => {
 			assert.equal(shouldUseBackgroundLaunch({}, { mode: "interactive" }, false), true);
 		});
 		await withFakeTmux(false, async () => {
-			assert.equal(shouldUseBackgroundLaunch({}, { mode: "interactive" }, true), true);
+			assert.throws(() => shouldUseBackgroundLaunch({}, { mode: "interactive" }, true), /no background fallback/);
 		});
 	});
 
@@ -218,6 +218,13 @@ describe("coordinator-turn launch hardening", () => {
 		const unavailableWatchKinds: Array<"background" | "interactive"> = [];
 		const unavailableTool = registerCoreTool(makeLaunchRuntime(defs, unavailableRecords, unavailableWatchKinds));
 		await withFakeTmux(false, async () => {
+			await assert.rejects(unavailableTool.execute(
+				"invalid-context", { agent: "ui-child", name: "ui-child", title: "Invalid context", task: "Do not launch" },
+				undefined, undefined, context,
+			), /no background fallback/);
+			assert.equal(unavailableRecords.length, 0);
+			delete process.env.PI_SUBAGENT_MUX;
+			delete process.env.TMUX;
 			const result = (await unavailableTool.execute(
 				"fallback-call",
 				{ agent: "ui-child", name: "ui-child", title: "Fallback child", task: "Use the background fallback" },

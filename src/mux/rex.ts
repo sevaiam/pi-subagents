@@ -164,15 +164,16 @@ const managedChildTitles = new Map<string, string>();
 const titleBody = (title: string) => title.replace(/^(?:\[[^\]]+\]\s*)+/, "").trim();
 
 /** Optional title tool changes only its launch-owned label, preserving manual edits and existing tags. */
-export function renameRexChild(title: string): void {
+export function renameRexChild(title: string): boolean {
 	const caller = requireRexCaller();
-	if (!process.env.PI_SUBAGENT_NAME || process.env.PI_SUBAGENT_SURFACE !== caller.blockId) return;
+	if (!process.env.PI_SUBAGENT_NAME || process.env.PI_SUBAGENT_SURFACE !== caller.blockId) return false;
 	const current = inspectRexBlock(caller).label ?? "";
 	const key = `${caller.sessionId}:${caller.blockId}`;
 	const expected = managedChildTitles.get(key) ?? process.env.PI_SUBAGENT_INITIAL_TITLE;
-	if (expected === undefined || titleBody(current) !== titleBody(expected)) return;
+	if (expected === undefined || titleBody(current) !== titleBody(expected)) return false;
 	const tags = current.match(/^(?:\[[^\]]+\]\s*)+/)?.[0].trim();
 	const next = tags ? `${tags} ${titleBody(title)}`.trim() : title.trim();
 	execFileSync("rex", [...scopedArgs(caller, ["block", "rename"]), "--", caller.blockId, next], OPTIONS);
 	managedChildTitles.set(key, next);
+	return true;
 }

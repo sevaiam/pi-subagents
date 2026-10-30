@@ -6,7 +6,7 @@ import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "../agents
 import { assertModelAllowed, buildModelRef, splitModelRef } from "../agents/model-refs.ts";
 import { getArtifactStorageRoot } from "../artifact-storage.ts";
 import { buildAppendSystemInheritancePlan } from "../launch/append-system.ts";
-import { getPiInvocation, getSubagentChildProcessEnv } from "../launch/child-command.ts";
+import { getPiInvocation, getSubagentChildProcessEnv, resolveRuntimeExecutable } from "../launch/child-command.ts";
 import { resolveDenyEnvPatterns } from "../launch/child-env.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "../launch/context-boundary.ts";
 import { parseEnvString } from "../launch/env.ts";
@@ -492,9 +492,12 @@ async function resumeSubagentSessionWithoutWidth(
 			running.stderrTail = rememberTail(running.stderrTail, chunk);
 		});
 	} else {
+		resolveRuntimeExecutable();
+		getPiInvocation([]);
 		const surfaceName = invocationMetadata?.sessionTitle ?? displayName;
 		const backend = getMuxBackend();
-		if (invocationMetadata?.muxBackend && invocationMetadata.muxBackend !== backend) {
+		if (invocationMetadata?.muxBackend && invocationMetadata.muxBackend !== backend &&
+			(invocationMetadata.muxBackend === "rex" || backend === "rex")) {
 			throw new Error(`Cannot resume ${invocationMetadata.muxBackend} child in ${backend ?? "unknown"} context`);
 		}
 		const rexTarget = backend === "rex" ? requireRexCaller() : undefined;
@@ -546,6 +549,7 @@ async function resumeSubagentSessionWithoutWidth(
 			...(zellijTarget ? { deriveZellijPaneSurface: true } : {}),
 			...(rexTarget ? { rexParent: rexTarget } : {}),
 		});
+		running.disposeLaunchCapsule = dispose;
 		try {
 			const surface = rexTarget
 				? createRexCommandSurface(surfaceName, argv, resumeCwd ?? process.cwd())
@@ -562,6 +566,7 @@ async function resumeSubagentSessionWithoutWidth(
 		} catch (error) {
 			// Nothing consumed the capsule; do not leave credentials behind.
 			dispose();
+			running.disposeLaunchCapsule = undefined;
 			throw error;
 		}
 	}

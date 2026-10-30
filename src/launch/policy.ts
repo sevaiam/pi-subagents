@@ -56,12 +56,14 @@ export function shouldUseBackgroundLaunch(
 	agentDefs: AgentDefaults | null,
 	hasUI: boolean,
 ): boolean {
-	return (
-		agentDefs?.llmAsVerifier === true ||
-		(params.background ?? agentDefs?.mode === "background") ||
-		!hasUI ||
-		!isMuxAvailable()
-	);
+	if (agentDefs?.llmAsVerifier === true || (params.background ?? agentDefs?.mode === "background") || !hasUI) return true;
+	if (isMuxAvailable()) return false;
+	const identityKeys = ["HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "REX_SESSION", "REX_BLOCK",
+		"CMUX_SOCKET_PATH", "TMUX", "ZELLIJ", "ZELLIJ_SESSION_NAME", "WEZTERM_UNIX_SOCKET"];
+	if (process.env.PI_SUBAGENT_MUX?.trim() || identityKeys.some((key) => process.env[key] !== undefined)) {
+		throw new Error("Interactive subagent cannot resolve its multiplexer identity or preference. Check caller IDs, CLI availability, and PI_SUBAGENT_MUX; no background fallback is allowed.");
+	}
+	return true; // A UI without any mux context retains the existing headless fallback.
 }
 
 function resolveSubagentAsync(params: Partial<SubagentParamsInput>, agentDefs: AgentDefaults | null): boolean {
