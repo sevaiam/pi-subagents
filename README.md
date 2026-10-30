@@ -23,11 +23,13 @@ Special thanks to [@FasalZein](https://github.com/FasalZein) and [@isthatyousaf]
 
 ## Install
 
-The Rex backend and launcher fixes are on `noticket/rex-backend`. The fork's `main` branch tracks upstream.
+The fork's `main` branch includes the Rex backend and launcher fixes on top of upstream `edxeth/pi-subagents`.
 
 ```bash
-pi install git:github.com/sevaiam/pi-subagents@noticket/rex-backend
+pi install git:github.com/sevaiam/pi-subagents@main
 ```
+
+For future upstream updates, merge `upstream/main` into the fork's `main` branch. Do not reset the fork to upstream, because that would remove the Rex changes.
 
 If upstream `edxeth/pi-subagents` is already configured, replace that package declaration instead of loading both packages. They register the same tool names. Restart Pi after changing the launcher package.
 
